@@ -2,8 +2,7 @@
 --[[
 	Blossom UI Library (single file)
 
-	local Blossom = loadstring(readfile("Blossom.luau"))()      -- executor
-	local Blossom = require(path.to.Blossom)                    -- Studio
+	local Blossom = loadstring(readfile("Blossom.luau"))()
 
 	local Window = Blossom.new({ Title = "Blossom", Script = "blossom.lua", Build = "operation one" })
 	Window:Category("Combat")
@@ -31,9 +30,8 @@
 	or from code: Window:SetHotkeyFilter(onlyAssigned, onlyEnabled).
 
 	Options for Blossom.new: Title, Script, Build, Theme, MenuKey, Font (a font family string),
-	Size and MinSize (Vector2), Resizable (default true), DragGlow (default true; false hides the glow while dragging),
-	DragMode ("Auto" default, "Full" or "Frame": Frame hides the page area while the window is carried; Auto switches to it only if
-	dragging is measurably slow). Window:Stats() prints how many instances the window draws. Window:SetSize(width, height) resizes from code.
+	Size and MinSize (Vector2), Resizable (default true), DragGlow (default true; false hides the glow while dragging).
+	The window follows the cursor with no smoothing. Window:SetSize(width, height) resizes from code.
 ]]
 
 local Players = game:GetService("Players")
@@ -403,11 +401,9 @@ end
 
 local FrameConnection
 local sweepHover
-local IdleDt, DragDepth = 1 / 60, 0   -- smoothed frame time while nothing is dragged
 local function ensureLoop()
 	if FrameConnection then return end
 	FrameConnection = RunService.RenderStepped:Connect(function(dt)
-		if DragDepth == 0 then IdleDt += (math.min(dt, 0.1) - IdleDt) * 0.05 end
 		stepAnimator(dt)
 		for job in Jobs do job(dt) end
 		sweepHover()
@@ -1103,8 +1099,6 @@ end
 
 local function httpGet(url)
 	local ok, body = pcall(function() return game:HttpGet(url) end)
-	if ok and type(body) == "string" then return body end
-	ok, body = pcall(HttpService.GetAsync, HttpService, url)
 	if ok and type(body) == "string" then return body end
 	return nil
 end
@@ -2531,9 +2525,6 @@ local function guiParent(screen)
 	if not ok then
 		ok = pcall(function() screen.Parent = game:GetService("CoreGui") end)
 	end
-	if not ok or not screen.Parent then
-		screen.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
-	end
 end
 
 function Window:Category(name)
@@ -3048,45 +3039,31 @@ function Window:_buildResize()
 end
 
 function Window:_makeDraggable(handle, target, allowed)
-	-- Same scheme as the default Library dragging: remember the start point once, then on every
-	-- InputChanged move the frame by (current - start). No per-frame polling, no extra work.
+	-- No smoothing and no springs: the position is written straight from the live cursor, once from the
+	-- input event and again right before each frame is rendered, so the window never trails the pointer.
 	handle.InputBegan:Connect(function(input)
 		if not isClick(input) then return end
-		local startMouse = mousePos()
-		if allowed and not allowed(startMouse) then return end
-		local startInput, origin = input.Position, target.Position
+		if allowed and not allowed(mousePos()) then return end
+		local isMouse = input.UserInputType == Enum.UserInputType.MouseButton1
+		local touchPoint = Vec2(input.Position.X, input.Position.Y)
+		local function pointer()
+			if isMouse then return UserInputService:GetMouseLocation() end
+			return touchPoint
+		end
+		local startPoint, origin = pointer(), target.Position
 		-- Read once: asking for AbsoluteSize while moving forces a layout pass every frame.
 		local size, screenSize = target.AbsoluteSize, self.Screen.AbsoluteSize
 		local glow = not self.DragGlow and GlowOf[target] or nil
-		local mode = target == self.Holder and self.DragMode or "Full"
-		local dragging, glowHidden, contentHidden, lastPosition = true, false, false, nil
 		local keep = math.min(60, size.X)
 		local anchor = target.AnchorPoint
-		DragDepth += 1
+		local dragging, glowHidden, lastPosition = true, false, nil
 
-		local moveConn, endConn
-		local function finish()
+		local function apply()
 			if not dragging then return end
-			dragging = false
-			moveConn:Disconnect()
-			endConn:Disconnect()
-			self.Moving = false
-			DragDepth -= 1
-			if glowHidden then for _, layer in glow do layer.Visible = true end end
-			if contentHidden then self.Pages.Visible = true end
-		end
-
-		moveConn = UserInputService.InputChanged:Connect(function(change)
-			if not dragging then return end
-			if change.UserInputType ~= Enum.UserInputType.MouseMovement and change.UserInputType ~= Enum.UserInputType.Touch then return end
-			local delta = change.Position - startInput
+			local delta = pointer() - startPoint
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
 			self.Moving = true
-			if mode == "Frame" and not contentHidden then
-				contentHidden = true
-				self.Pages.Visible = false
-			end
 			if glow and not glowHidden then
 				glowHidden = true
 				for _, layer in glow do layer.Visible = false end
@@ -3097,40 +3074,39 @@ function Window:_makeDraggable(handle, target, allowed)
 			local position = Offset(round(left + anchor.X * size.X), round(top + anchor.Y * size.Y))
 			if position ~= lastPosition then
 				lastPosition = position
-				target.Position = position -- direct, no spring: sticks to the pointer
+				target.Position = position
+			end
+		end
+
+		local frameConn, moveConn, endConn, stateConn
+		local function finish()
+			if not dragging then return end
+			apply()
+			dragging = false
+			frameConn:Disconnect()
+			moveConn:Disconnect()
+			endConn:Disconnect()
+			if stateConn then stateConn:Disconnect() end
+			self.Moving = false
+			if glowHidden then for _, layer in glow do layer.Visible = true end end
+		end
+
+		frameConn = RunService.RenderStepped:Connect(apply)
+		moveConn = UserInputService.InputChanged:Connect(function(change)
+			if change.UserInputType == Enum.UserInputType.Touch and not isMouse then
+				touchPoint = Vec2(change.Position.X, change.Position.Y)
+				apply()
+			elseif change.UserInputType == Enum.UserInputType.MouseMovement and isMouse then
+				apply()
 			end
 		end)
 		endConn = UserInputService.InputEnded:Connect(function(ended)
 			if isClick(ended) then finish() end
 		end)
-		input.Changed:Connect(function()
+		stateConn = input.Changed:Connect(function()
 			if input.UserInputState == Enum.UserInputState.End then finish() end
 		end)
 	end)
-end
-
--- Counts what the renderer has to draw for this window right now (call it with the menu open).
-function Window:Stats()
-	local counts = { Total = 0, Shown = 0, ShownText = 0, ShownStrokes = 0, ShownCorners = 0 }
-	local function visit(inst, shown)
-		counts.Total += 1
-		local info = classInfo(inst)
-		if info.Gui then
-			shown = shown and inst.Visible
-			if shown then
-				counts.Shown += 1
-				if info.Text then counts.ShownText += 1 end
-			end
-		elseif shown then
-			if inst.ClassName == "UIStroke" then counts.ShownStrokes += 1
-			elseif inst.ClassName == "UICorner" then counts.ShownCorners += 1 end
-		end
-		for _, child in inst:GetChildren() do visit(child, shown) end
-	end
-	visit(self.Holder, true)
-	print(("[Blossom] instances %d, drawn %d (text %d, strokes %d, corners %d), idle frame %.1f ms, heavy drag: %s"):format(
-		counts.Total, counts.Shown, counts.ShownText, counts.ShownStrokes, counts.ShownCorners, IdleDt * 1000, tostring(self.HeavyDrag == true)))
-	return counts
 end
 
 -- Input can reach the window background through anything above it, so check the pointer directly.
@@ -4320,7 +4296,7 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
-		Visible = true, DragGlow = options.DragGlow ~= false, DragMode = options.DragMode or "Full", HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
+		Visible = true, DragGlow = options.DragGlow ~= false, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 		HotkeyOnlyAssigned = options.HotkeyOnlyAssigned == true, HotkeyOnlyEnabled = options.HotkeyOnlyEnabled == true,
@@ -4458,8 +4434,9 @@ function Blossom.new(options)
 	end))
 
 	local function perFrame(dt)
-		win:_flushThemeColors(dt)
 		if win.OpenDropdown then win.OpenDropdown.Follow() end
+		if win.Moving then return end -- nothing extra runs while the window is carried
+		win:_flushThemeColors(dt)
 		if win.CurrentTab and not win.Moving and win.Visible then
 			for _, column in win:Cols() do
 				column:Cull()
