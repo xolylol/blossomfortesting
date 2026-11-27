@@ -3049,12 +3049,18 @@ function Window:_setLite(on)
 			if inst.ClassName == "UIStroke" and inst.Parent ~= self.Root and inst.Enabled then
 				inst.Enabled = false
 				list[#list + 1] = inst
+			elseif inst.Name == "Icon" and inst.ClassName == "Frame" and inst.Visible then
+				-- Icons are built from many rotated rounded frames: by far the heaviest thing to move.
+				inst.Visible = false
+				list[#list + 1] = inst
 			end
 		end
 		self.LiteList = list
 	elseif self.LiteList then
-		for _, stroke in self.LiteList do
-			if stroke.Parent then stroke.Enabled = true end
+		for _, inst in self.LiteList do
+			if inst.Parent then
+				if inst.ClassName == "UIStroke" then inst.Enabled = true else inst.Visible = true end
+			end
 		end
 		self.LiteList = nil
 	end
