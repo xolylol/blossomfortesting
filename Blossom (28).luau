@@ -31,7 +31,9 @@
 	or from code: Window:SetHotkeyFilter(onlyAssigned, onlyEnabled).
 
 	Options for Blossom.new: Title, Script, Build, Theme, MenuKey, Font (a font family string),
-	Size and MinSize (Vector2), Resizable (default true), DragGlow (default false: the window glow is hidden while dragging, for FPS). Window:SetSize(width, height) resizes from code.
+	Size and MinSize (Vector2), Resizable (default true), DragGlow (default true; false hides the glow while dragging),
+	DragMode ("Auto" default, "Full" or "Frame": Frame hides the page area while the window is carried; Auto switches to it only if
+	dragging is measurably slow). Window:Stats() prints how many instances the window draws. Window:SetSize(width, height) resizes from code.
 ]]
 
 local Players = game:GetService("Players")
@@ -401,9 +403,11 @@ end
 
 local FrameConnection
 local sweepHover
+local IdleDt, DragDepth = 1 / 60, 0   -- smoothed frame time while nothing is dragged
 local function ensureLoop()
 	if FrameConnection then return end
 	FrameConnection = RunService.RenderStepped:Connect(function(dt)
+		if DragDepth == 0 then IdleDt += (math.min(dt, 0.1) - IdleDt) * 0.05 end
 		stepAnimator(dt)
 		for job in Jobs do job(dt) end
 		sweepHover()
@@ -1329,6 +1333,27 @@ function Column:ScrollTo(y)
 	self.Target = y
 	self:ClampScroll()
 	animate(self.Scroll, "CanvasPosition", Vec2(0, self.Target), "Soft")
+end
+
+-- Sections scrolled out of view are switched off. A hidden section costs the renderer nothing, while a
+-- section that is merely clipped is still processed every frame (and again for every move of the window).
+local CULL_MARGIN = 160
+
+function Column:Cull()
+	local tab = self.Tab
+	local top = self.Scroll.CanvasPosition.Y - CULL_MARGIN
+	local bottom = top + tab.Window.Height - Metrics.Pad * 2 - (tab.TopH or 0) + CULL_MARGIN * 2
+	for _, section in self.Sections do
+		local root = section.Root
+		local show = true
+		if not section.Dragging and not section.Dropping then
+			-- Both the current (animated) and the target rectangle count, so nothing pops while it slides.
+			local y, h = root.Position.Y.Offset, root.Size.Y.Offset
+			local goalY, goalH = section.Y, section.TotalH
+			show = (y + h >= top and y <= bottom) or (goalY + goalH >= top and goalY <= bottom)
+		end
+		if root.Visible ~= show then root.Visible = show end
+	end
 end
 
 -------------------------------------------------------------------------------
@@ -3029,16 +3054,26 @@ function Window:_makeDraggable(handle, target, allowed)
 		local start, origin = mousePos(), target.Position
 		if allowed and not allowed(start) then return end
 		-- The size cannot change while the pointer drags, so it is read once. Reading AbsoluteSize
-		-- right after moving the window forced a full layout pass of the whole window every frame.
+		-- right after moving the window forced a layout pass of the whole window every frame.
 		local size = target.AbsoluteSize
 		local glow = not self.DragGlow and GlowOf[target] or nil
-		local glowHidden, lastPosition = false, nil
+		-- Frame mode: the page area is switched off while the window is carried. Auto mode switches to it
+		-- only when moving the window is measurably slow on this machine, and remembers that.
+		local mode = target == self.Holder and self.DragMode or "Full"
+		local glowHidden, contentHidden, lastPosition = false, false, nil
+		local frames, total, judged = 0, 0, mode ~= "Auto"
+		local function hideContent()
+			if contentHidden then return end
+			contentHidden = true
+			self.Pages.Visible = false
+		end
+		DragDepth += 1
 		beginDrag(function(point)
 			local delta = point - start
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
 			self.Moving = true
-			-- The soft glow is several large translucent layers; redrawing them is most of the cost of a move.
+			if mode == "Frame" or (mode == "Auto" and self.HeavyDrag) then hideContent() end
 			if glow and not glowHidden then
 				glowHidden = true
 				for _, layer in glow do layer.Visible = false end
@@ -3051,11 +3086,51 @@ function Window:_makeDraggable(handle, target, allowed)
 			end
 		end, function()
 			self.Moving = false
+			DragDepth -= 1
 			if glowHidden then
 				for _, layer in glow do layer.Visible = true end
 			end
+			if contentHidden then self.Pages.Visible = true end
+		end, function(_, dt)
+			if judged or not self.Moving then return end
+			frames += 1
+			if frames <= 3 then return end -- the first frames of a drag always hitch
+			total += math.min(dt, 0.25)
+			if frames - 3 >= 8 then
+				judged = true
+				local average = total / 8
+				-- Slower than ~38 fps and clearly worse than the same machine when idle: the window itself is the cost.
+				if average > 0.026 and average > IdleDt * 1.35 then
+					self.HeavyDrag = true
+					hideContent()
+				end
+			end
 		end)
 	end)
+end
+
+-- Counts what the renderer has to draw for this window right now (call it with the menu open).
+function Window:Stats()
+	local counts = { Total = 0, Shown = 0, ShownText = 0, ShownStrokes = 0, ShownCorners = 0 }
+	local function visit(inst, shown)
+		counts.Total += 1
+		local info = classInfo(inst)
+		if info.Gui then
+			shown = shown and inst.Visible
+			if shown then
+				counts.Shown += 1
+				if info.Text then counts.ShownText += 1 end
+			end
+		elseif shown then
+			if inst.ClassName == "UIStroke" then counts.ShownStrokes += 1
+			elseif inst.ClassName == "UICorner" then counts.ShownCorners += 1 end
+		end
+		for _, child in inst:GetChildren() do visit(child, shown) end
+	end
+	visit(self.Holder, true)
+	print(("[Blossom] instances %d, drawn %d (text %d, strokes %d, corners %d), idle frame %.1f ms, heavy drag: %s"):format(
+		counts.Total, counts.Shown, counts.ShownText, counts.ShownStrokes, counts.ShownCorners, IdleDt * 1000, tostring(self.HeavyDrag == true)))
+	return counts
 end
 
 -- Input can reach the window background through anything above it, so check the pointer directly.
@@ -3475,6 +3550,10 @@ function Window:SetVisible(visible)
 	self.Visible = visible
 	self:CloseFloating()
 	self.ModalButton.Visible = visible
+	if visible and self.CurrentTab then
+		-- Cull before the fade captures the window, so off-screen sections are not part of it.
+		for _, column in self:Cols() do column:Cull() end
+	end
 	-- Fade only: scaling the window resamples its text, which made the font look thin until the scale was removed.
 	if visible then
 		self.Fader:Show()
@@ -4241,7 +4320,7 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
-		Visible = true, DragGlow = options.DragGlow == true, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
+		Visible = true, DragGlow = options.DragGlow ~= false, DragMode = options.DragMode or "Auto", HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 		HotkeyOnlyAssigned = options.HotkeyOnlyAssigned == true, HotkeyOnlyEnabled = options.HotkeyOnlyEnabled == true,
@@ -4383,6 +4462,7 @@ function Blossom.new(options)
 		if win.OpenDropdown then win.OpenDropdown.Follow() end
 		if win.CurrentTab and not win.Moving and win.Visible then
 			for _, column in win:Cols() do
+				column:Cull()
 				local y = column.Scroll.CanvasPosition.Y
 				local showTop, showBottom = y > 1, y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1
 				if showTop ~= column.ShowTop then
