@@ -30,8 +30,7 @@
 	or from code: Window:SetHotkeyFilter(onlyAssigned, onlyEnabled).
 
 	Options for Blossom.new: Title, Script, Build, Theme, MenuKey, Font (a font family string),
-	Size and MinSize (Vector2), Resizable (default true), DragGlow (default true; false hides the glow while dragging),
-	DragLite (default true; inner outlines are hidden only while the window is held, false keeps them).
+	Size and MinSize (Vector2), Resizable (default true), DragGlow (default true; false hides the glow while dragging).
 	The window follows the cursor with no smoothing. Window:SetSize(width, height) resizes from code.
 ]]
 
@@ -3039,33 +3038,6 @@ function Window:_buildResize()
 	handle("ResizeCorner", Dim2(1, 3, 1, 3), Offset(18, 18), Vec2(1, 1), 1, 1)
 end
 
--- While the window is carried, inner UIStrokes are switched off (the outer window outline stays) and come back on release.
--- Strokes are what makes a moving window expensive to draw. Turn off with DragLite = false in Blossom.new.
-function Window:_setLite(on)
-	if on then
-		if self.LiteList then return end
-		local list = {}
-		for _, inst in self.Holder:GetDescendants() do
-			if inst.ClassName == "UIStroke" and inst.Parent ~= self.Root and inst.Enabled then
-				inst.Enabled = false
-				list[#list + 1] = inst
-			elseif inst.Name == "Icon" and inst.ClassName == "Frame" and inst.Visible then
-				-- Icons are built from many rotated rounded frames: by far the heaviest thing to move.
-				inst.Visible = false
-				list[#list + 1] = inst
-			end
-		end
-		self.LiteList = list
-	elseif self.LiteList then
-		for _, inst in self.LiteList do
-			if inst.Parent then
-				if inst.ClassName == "UIStroke" then inst.Enabled = true else inst.Visible = true end
-			end
-		end
-		self.LiteList = nil
-	end
-end
-
 function Window:_makeDraggable(handle, target, allowed)
 	-- No smoothing and no springs: the position is written straight from the live cursor, once from the
 	-- input event and again right before each frame is rendered, so the window never trails the pointer.
@@ -3085,7 +3057,6 @@ function Window:_makeDraggable(handle, target, allowed)
 		local keep = math.min(60, size.X)
 		local anchor = target.AnchorPoint
 		local dragging, glowHidden, lastPosition = true, false, nil
-		local lite = self.DragLite and target == self.Holder
 
 		local function apply()
 			if not dragging then return end
@@ -3093,7 +3064,6 @@ function Window:_makeDraggable(handle, target, allowed)
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
 			self.Moving = true
-			if lite and not self.LiteList then self:_setLite(true) end
 			if glow and not glowHidden then
 				glowHidden = true
 				for _, layer in glow do layer.Visible = false end
@@ -3118,7 +3088,6 @@ function Window:_makeDraggable(handle, target, allowed)
 			endConn:Disconnect()
 			if stateConn then stateConn:Disconnect() end
 			self.Moving = false
-			if lite then self:_setLite(false) end
 			if glowHidden then for _, layer in glow do layer.Visible = true end end
 		end
 
@@ -4327,7 +4296,7 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
-		Visible = true, DragGlow = options.DragGlow ~= false, DragLite = options.DragLite ~= false, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
+		Visible = true, DragGlow = options.DragGlow ~= false, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 		HotkeyOnlyAssigned = options.HotkeyOnlyAssigned == true, HotkeyOnlyEnabled = options.HotkeyOnlyEnabled == true,
