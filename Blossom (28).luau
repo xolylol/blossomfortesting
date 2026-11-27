@@ -617,20 +617,19 @@ local GlowOf = {}
 local function addGlow(inst)
 	local parent = inst.Parent
 	if not parent then return nil end
-	local corner = inst:FindFirstChildOfClass("UICorner")
-	local radius = corner and corner.CornerRadius.Offset or 0
-	local layers = {}
-	for index = GlowLayers, 1, -1 do
-		local grow = index * 2
-		local layer = new("Frame", {
-			Name = "Glow", Bg = "Shadow", BackgroundTransparency = 0.93, Radius = radius + grow,
-			Position = Offset(-grow, -grow), Size = Dim2(1, grow * 2, 1, grow * 2), ZIndex = inst.ZIndex - 1,
-		}, parent)
-		layer.Active = false
-		table.insert(layers, layer)
-	end
-	GlowOf[parent] = layers
-	return layers
+	-- One 9-slice shadow image instead of 5 stacked translucent rounded frames: a single textured
+	-- quad, so moving the window with the glow visible costs almost nothing.
+	local grow = 15
+	local layer = new("ImageLabel", {
+		Name = "Glow", BackgroundTransparency = 1, Image = "rbxassetid://1316045217",
+		ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(10, 10, 118, 118),
+		ImageTransparency = 0.62, Position = Offset(-grow, -grow), Size = Dim2(1, grow * 2, 1, grow * 2),
+		ZIndex = inst.ZIndex - 1,
+	}, parent)
+	layer.Active = false
+	bind(layer, "ImageColor3", "Shadow")
+	GlowOf[parent] = { layer }
+	return { layer }
 end
 
 local function addShadow(inst, style)
@@ -4321,7 +4320,7 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
-		Visible = true, DragGlow = options.DragGlow == true, DragMode = options.DragMode or "Full", HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
+		Visible = true, DragGlow = options.DragGlow ~= false, DragMode = options.DragMode or "Full", HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 		HotkeyOnlyAssigned = options.HotkeyOnlyAssigned == true, HotkeyOnlyEnabled = options.HotkeyOnlyEnabled == true,
