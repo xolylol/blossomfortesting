@@ -2,7 +2,8 @@
 --[[
 	Blossom UI Library (single file)
 
-	local Blossom = loadstring(readfile("Blossom.luau"))()
+	local Blossom = loadstring(readfile("Blossom.luau"))()      -- executor
+	local Blossom = require(path.to.Blossom)                    -- Studio
 
 	local Window = Blossom.new({ Title = "Blossom", Script = "blossom.lua", Build = "operation one" })
 	Window:Category("Combat")
@@ -30,8 +31,7 @@
 	or from code: Window:SetHotkeyFilter(onlyAssigned, onlyEnabled).
 
 	Options for Blossom.new: Title, Script, Build, Theme, MenuKey, Font (a font family string),
-	Size and MinSize (Vector2), Resizable (default true), DragGlow (default true; false hides the glow while dragging).
-	The window follows the cursor with no smoothing. Window:SetSize(width, height) resizes from code.
+	Size and MinSize (Vector2), Resizable (default true). Window:SetSize(width, height) resizes from code.
 ]]
 
 local Players = game:GetService("Players")
@@ -284,7 +284,6 @@ local Presets = {
 }
 
 local Active, Tracks, Jobs = {}, {}, {}
-local StepCache = {}
 local EPS = { number = 0.0015, Color3 = 0.003, UDim2 = 0.4, Vector2 = 0.4 }
 
 local function encode(v)
@@ -344,8 +343,7 @@ end
 local function stepAnimator(dt)
 	if #Active == 0 then return end
 	dt = math.min(dt, 1 / 20)
-	local cache = StepCache
-	table.clear(cache)
+	local cache = {}
 	local i = 1
 	while i <= #Active do
 		local e = Active[i]
@@ -608,24 +606,23 @@ local ShadowsAvailable = pcall(function() Instance.new("UIShadow"):Destroy() end
 -- The window glow is stacked soft frames behind the window, not a live UIShadow: a blurred UIShadow is
 -- re-rendered every frame while the window moves, which is what dropped FPS during dragging.
 local GlowLayers = 5
-local GlowOf = {}
 
 local function addGlow(inst)
 	local parent = inst.Parent
 	if not parent then return nil end
-	-- One 9-slice shadow image instead of 5 stacked translucent rounded frames: a single textured
-	-- quad, so moving the window with the glow visible costs almost nothing.
-	local grow = 15
-	local layer = new("ImageLabel", {
-		Name = "Glow", BackgroundTransparency = 1, Image = "rbxassetid://1316045217",
-		ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(10, 10, 118, 118),
-		ImageTransparency = 0.62, Position = Offset(-grow, -grow), Size = Dim2(1, grow * 2, 1, grow * 2),
-		ZIndex = inst.ZIndex - 1,
-	}, parent)
-	layer.Active = false
-	bind(layer, "ImageColor3", "Shadow")
-	GlowOf[parent] = { layer }
-	return { layer }
+	local corner = inst:FindFirstChildOfClass("UICorner")
+	local radius = corner and corner.CornerRadius.Offset or 0
+	local layers = {}
+	for index = GlowLayers, 1, -1 do
+		local grow = index * 2
+		local layer = new("Frame", {
+			Name = "Glow", Bg = "Shadow", BackgroundTransparency = 0.93, Radius = radius + grow,
+			Position = Offset(-grow, -grow), Size = Dim2(1, grow * 2, 1, grow * 2), ZIndex = inst.ZIndex - 1,
+		}, parent)
+		layer.Active = false
+		table.insert(layers, layer)
+	end
+	return layers
 end
 
 local function addShadow(inst, style)
@@ -766,67 +763,34 @@ local function newFader(root)
 	return setmetatable({ Root = root, Alpha = 1, Entries = nil }, Fader)
 end
 
--- IsA is slow when it runs for every instance of the window, so each class is classified once.
-local ClassInfo = {}
-
-local function classInfo(inst)
-	local name = inst.ClassName
-	local info = ClassInfo[name]
-	if not info then
-		info = {
-			Gui = inst:IsA("GuiObject"),
-			Text = TEXT_CLASSES[name] == true,
-			Image = inst:IsA("ImageLabel"),
-			Stroke = inst:IsA("UIStroke") or name == "UIShadow",
-		}
-		ClassInfo[name] = info
-	end
-	return info
-end
-
--- Parallel arrays instead of a table per entry: no allocations while the window fades.
 local function captureFade(root)
-	local insts, props, bases = {}, {}, {}
-	local n = 0
+	local entries = {}
 	local function add(inst, prop)
 		-- A value that's still animating would be restored stale when the fade ends.
-		if NoFade[inst] then return end
-		local map = Tracks[inst]
-		if map and map[prop] then return end
+		if NoFade[inst] or (Tracks[inst] and Tracks[inst][prop]) then return end
 		local base = inst[prop]
-		if base < 1 then
-			n += 1
-			insts[n], props[n], bases[n] = inst, prop, base
-		end
+		if base < 1 then table.insert(entries, { inst, prop, base }) end
 	end
 	local function visit(inst)
-		local info = classInfo(inst)
-		if info.Gui then
+		if inst:IsA("GuiObject") then
 			if inst ~= root and not inst.Visible then return end
 			add(inst, "BackgroundTransparency")
-			if info.Text then add(inst, "TextTransparency") end
-			if info.Image then add(inst, "ImageTransparency") end
-		elseif info.Stroke then
+			if TEXT_CLASSES[inst.ClassName] then add(inst, "TextTransparency") end
+			if inst:IsA("ImageLabel") then add(inst, "ImageTransparency") end
+		elseif inst:IsA("UIStroke") or inst.ClassName == "UIShadow" then
 			add(inst, "Transparency")
 		end
 		for _, child in inst:GetChildren() do visit(child) end
 	end
 	visit(root)
-	return { Insts = insts, Props = props, Bases = bases, N = n, Step = -1 }
+	return entries
 end
 
 function Fader:_apply(alpha)
-	local set = self.Entries
-	if not set then return end
-	-- Transparency is drawn in 8 bits, so alpha moves in 1/255 steps: the last frames of the spring
-	-- (tiny changes nobody can see) no longer rewrite every instance of the window.
-	local step = floor(alpha * 255 + 0.5)
-	if step == set.Step then return end
-	set.Step = step
-	local a = step / 255
-	local insts, props, bases = set.Insts, set.Props, set.Bases
-	for i = 1, set.N do
-		insts[i][props[i]] = 1 - (1 - bases[i]) * a
+	local entries = self.Entries
+	if not entries then return end
+	for _, e in entries do
+		e[1][e[2]] = 1 - (1 - e[3]) * alpha
 	end
 end
 
@@ -1100,6 +1064,8 @@ end
 local function httpGet(url)
 	local ok, body = pcall(function() return game:HttpGet(url) end)
 	if ok and type(body) == "string" then return body end
+	ok, body = pcall(HttpService.GetAsync, HttpService, url)
+	if ok and type(body) == "string" then return body end
 	return nil
 end
 
@@ -1326,27 +1292,6 @@ function Column:ScrollTo(y)
 	self.Target = y
 	self:ClampScroll()
 	animate(self.Scroll, "CanvasPosition", Vec2(0, self.Target), "Soft")
-end
-
--- Sections scrolled out of view are switched off. A hidden section costs the renderer nothing, while a
--- section that is merely clipped is still processed every frame (and again for every move of the window).
-local CULL_MARGIN = 160
-
-function Column:Cull()
-	local tab = self.Tab
-	local top = self.Scroll.CanvasPosition.Y - CULL_MARGIN
-	local bottom = top + tab.Window.Height - Metrics.Pad * 2 - (tab.TopH or 0) + CULL_MARGIN * 2
-	for _, section in self.Sections do
-		local root = section.Root
-		local show = true
-		if not section.Dragging and not section.Dropping then
-			-- Both the current (animated) and the target rectangle count, so nothing pops while it slides.
-			local y, h = root.Position.Y.Offset, root.Size.Y.Offset
-			local goalY, goalH = section.Y, section.TotalH
-			show = (y + h >= top and y <= bottom) or (goalY + goalH >= top and goalY <= bottom)
-		end
-		if root.Visible ~= show then root.Visible = show end
-	end
 end
 
 -------------------------------------------------------------------------------
@@ -2525,6 +2470,9 @@ local function guiParent(screen)
 	if not ok then
 		ok = pcall(function() screen.Parent = game:GetService("CoreGui") end)
 	end
+	if not ok or not screen.Parent then
+		screen.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+	end
 end
 
 function Window:Category(name)
@@ -2893,8 +2841,8 @@ function Window:OpenPicker(swatch, color)
 	self:_openPopup(picker, swatch, Vec2(p.X - 8, p.Y + s.Y + Metrics.Pad))
 end
 
-function Window:_clamped(target, x, y, cachedSize)
-	local screen, size, anchor = self.Screen.AbsoluteSize, cachedSize or target.AbsoluteSize, target.AnchorPoint
+function Window:_clamped(target, x, y, cachedSize, cachedScreen)
+	local screen, size, anchor = cachedScreen or self.Screen.AbsoluteSize, cachedSize or target.AbsoluteSize, target.AnchorPoint
 	local keep = math.min(60, size.X)
 	local left = math.clamp(x - anchor.X * size.X, keep - size.X, math.max(keep - size.X, screen.X - keep))
 	local top = math.clamp(y - anchor.Y * size.Y, 0, math.max(0, screen.Y - 30))
@@ -3039,72 +2987,25 @@ function Window:_buildResize()
 end
 
 function Window:_makeDraggable(handle, target, allowed)
-	-- No smoothing and no springs: the position is written straight from the live cursor, once from the
-	-- input event and again right before each frame is rendered, so the window never trails the pointer.
 	handle.InputBegan:Connect(function(input)
 		if not isClick(input) then return end
-		if allowed and not allowed(mousePos()) then return end
-		local isMouse = input.UserInputType == Enum.UserInputType.MouseButton1
-		local touchPoint = Vec2(input.Position.X, input.Position.Y)
-		local function pointer()
-			if isMouse then return UserInputService:GetMouseLocation() end
-			return touchPoint
-		end
-		local startPoint, origin = pointer(), target.Position
-		-- Read once: asking for AbsoluteSize while moving forces a layout pass every frame.
-		local size, screenSize = target.AbsoluteSize, self.Screen.AbsoluteSize
-		local glow = not self.DragGlow and GlowOf[target] or nil
-		local keep = math.min(60, size.X)
-		local anchor = target.AnchorPoint
-		local dragging, glowHidden, lastPosition = true, false, nil
-
-		local function apply()
-			if not dragging then return end
-			local delta = pointer() - startPoint
+		local start, origin = mousePos(), target.Position
+		if allowed and not allowed(start) then return end
+		local dragSize, dragScreen = target.AbsoluteSize, self.Screen.AbsoluteSize
+		local lastPosition = origin
+		beginDrag(function(point)
+			local delta = point - start
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
+			-- Set directly (no spring): the window sticks to the pointer instead of trailing behind it.
 			self.Moving = true
-			if glow and not glowHidden then
-				glowHidden = true
-				for _, layer in glow do layer.Visible = false end
-			end
-			local x, y = origin.X.Offset + delta.X, origin.Y.Offset + delta.Y
-			local left = math.clamp(x - anchor.X * size.X, keep - size.X, math.max(keep - size.X, screenSize.X - keep))
-			local top = math.clamp(y - anchor.Y * size.Y, 0, math.max(0, screenSize.Y - 30))
-			local position = Offset(round(left + anchor.X * size.X), round(top + anchor.Y * size.Y))
+			local position = self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y, dragSize, dragScreen)
 			if position ~= lastPosition then
 				lastPosition = position
-				target.Position = position
+				snap(target, "Position", position)
 			end
-		end
-
-		local frameConn, moveConn, endConn, stateConn
-		local function finish()
-			if not dragging then return end
-			apply()
-			dragging = false
-			frameConn:Disconnect()
-			moveConn:Disconnect()
-			endConn:Disconnect()
-			if stateConn then stateConn:Disconnect() end
+		end, function()
 			self.Moving = false
-			if glowHidden then for _, layer in glow do layer.Visible = true end end
-		end
-
-		frameConn = RunService.RenderStepped:Connect(apply)
-		moveConn = UserInputService.InputChanged:Connect(function(change)
-			if change.UserInputType == Enum.UserInputType.Touch and not isMouse then
-				touchPoint = Vec2(change.Position.X, change.Position.Y)
-				apply()
-			elseif change.UserInputType == Enum.UserInputType.MouseMovement and isMouse then
-				apply()
-			end
-		end)
-		endConn = UserInputService.InputEnded:Connect(function(ended)
-			if isClick(ended) then finish() end
-		end)
-		stateConn = input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then finish() end
 		end)
 	end)
 end
@@ -3526,10 +3427,6 @@ function Window:SetVisible(visible)
 	self.Visible = visible
 	self:CloseFloating()
 	self.ModalButton.Visible = visible
-	if visible and self.CurrentTab then
-		-- Cull before the fade captures the window, so off-screen sections are not part of it.
-		for _, column in self:Cols() do column:Cull() end
-	end
 	-- Fade only: scaling the window resamples its text, which made the font look thin until the scale was removed.
 	if visible then
 		self.Fader:Show()
@@ -4296,7 +4193,7 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
-		Visible = true, DragGlow = options.DragGlow ~= false, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
+		Visible = true, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 		HotkeyOnlyAssigned = options.HotkeyOnlyAssigned == true, HotkeyOnlyEnabled = options.HotkeyOnlyEnabled == true,
@@ -4434,12 +4331,10 @@ function Blossom.new(options)
 	end))
 
 	local function perFrame(dt)
-		if win.OpenDropdown then win.OpenDropdown.Follow() end
-		if win.Moving then return end -- nothing extra runs while the window is carried
 		win:_flushThemeColors(dt)
-		if win.CurrentTab and not win.Moving and win.Visible then
+		if win.OpenDropdown then win.OpenDropdown.Follow() end
+		if win.CurrentTab and not win.Moving then
 			for _, column in win:Cols() do
-				column:Cull()
 				local y = column.Scroll.CanvasPosition.Y
 				local showTop, showBottom = y > 1, y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1
 				if showTop ~= column.ShowTop then
