@@ -2986,6 +2986,34 @@ function Window:_buildResize()
 	handle("ResizeCorner", Dim2(1, 3, 1, 3), Offset(18, 18), Vec2(1, 1), 1, 1)
 end
 
+-- While the main window is being dragged, the borders and gradients on the visible page are switched off and
+-- put back on release. They are the costliest per-element layers to redraw on every move; glow and icons stay.
+-- Set to false to keep everything drawn while dragging.
+local DragLite = true
+
+local function liteOff(root)
+	local list = {}
+	local function visit(inst)
+		if inst:IsA("GuiObject") and not inst.Visible then return end
+		for _, child in inst:GetChildren() do
+			if (child:IsA("UIGradient") or (child:IsA("UIStroke") and inst ~= root)) and child.Enabled then
+				child.Enabled = false
+				table.insert(list, child)
+			else
+				visit(child)
+			end
+		end
+	end
+	visit(root)
+	return list
+end
+
+local function liteOn(list)
+	for _, inst in list do
+		if inst.Parent then inst.Enabled = true end
+	end
+end
+
 function Window:_makeDraggable(handle, target, allowed)
 	handle.InputBegan:Connect(function(input)
 		if not isClick(input) then return end
@@ -2993,10 +3021,12 @@ function Window:_makeDraggable(handle, target, allowed)
 		if allowed and not allowed(start) then return end
 		local dragSize, dragScreen = target.AbsoluteSize, self.Screen.AbsoluteSize
 		local lastPosition = origin
+		local lite
 		beginDrag(function(point)
 			local delta = point - start
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
+			if DragLite and not lite and target == self.Holder then lite = liteOff(self.Root) end
 			-- Set directly (no spring): the window sticks to the pointer instead of trailing behind it.
 			self.Moving = true
 			local position = self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y, dragSize, dragScreen)
@@ -3006,6 +3036,7 @@ function Window:_makeDraggable(handle, target, allowed)
 			end
 		end, function()
 			self.Moving = false
+			if lite then liteOn(lite); lite = nil end
 		end)
 	end)
 end
