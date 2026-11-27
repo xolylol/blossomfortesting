@@ -3049,62 +3049,63 @@ function Window:_buildResize()
 end
 
 function Window:_makeDraggable(handle, target, allowed)
+	-- Same scheme as the default Library dragging: remember the start point once, then on every
+	-- InputChanged move the frame by (current - start). No per-frame polling, no extra work.
 	handle.InputBegan:Connect(function(input)
 		if not isClick(input) then return end
-		local start, origin = mousePos(), target.Position
-		if allowed and not allowed(start) then return end
-		-- The size cannot change while the pointer drags, so it is read once. Reading AbsoluteSize
-		-- right after moving the window forced a layout pass of the whole window every frame.
-		local size = target.AbsoluteSize
+		local startMouse = mousePos()
+		if allowed and not allowed(startMouse) then return end
+		local startInput, origin = input.Position, target.Position
+		-- Read once: asking for AbsoluteSize while moving forces a layout pass every frame.
+		local size, screenSize = target.AbsoluteSize, self.Screen.AbsoluteSize
 		local glow = not self.DragGlow and GlowOf[target] or nil
-		-- Frame mode: the page area is switched off while the window is carried. Auto mode switches to it
-		-- only when moving the window is measurably slow on this machine, and remembers that.
 		local mode = target == self.Holder and self.DragMode or "Full"
-		local glowHidden, contentHidden, lastPosition = false, false, nil
-		local frames, total, judged = 0, 0, mode ~= "Auto"
-		local function hideContent()
-			if contentHidden then return end
-			contentHidden = true
-			self.Pages.Visible = false
-		end
+		local dragging, glowHidden, contentHidden, lastPosition = true, false, false, nil
+		local keep = math.min(60, size.X)
+		local anchor = target.AnchorPoint
 		DragDepth += 1
-		beginDrag(function(point)
-			local delta = point - start
+
+		local moveConn, endConn
+		local function finish()
+			if not dragging then return end
+			dragging = false
+			moveConn:Disconnect()
+			endConn:Disconnect()
+			self.Moving = false
+			DragDepth -= 1
+			if glowHidden then for _, layer in glow do layer.Visible = true end end
+			if contentHidden then self.Pages.Visible = true end
+		end
+
+		moveConn = UserInputService.InputChanged:Connect(function(change)
+			if not dragging then return end
+			if change.UserInputType ~= Enum.UserInputType.MouseMovement and change.UserInputType ~= Enum.UserInputType.Touch then return end
+			local delta = change.Position - startInput
 			if delta.Magnitude < 1 and not self.Moved[target] then return end
 			self.Moved[target] = true
 			self.Moving = true
-			if mode == "Frame" or (mode == "Auto" and self.HeavyDrag) then hideContent() end
+			if mode == "Frame" and not contentHidden then
+				contentHidden = true
+				self.Pages.Visible = false
+			end
 			if glow and not glowHidden then
 				glowHidden = true
 				for _, layer in glow do layer.Visible = false end
 			end
-			local position = self:_clamped(target, origin.X.Offset + delta.X, origin.Y.Offset + delta.Y, size)
+			local x, y = origin.X.Offset + delta.X, origin.Y.Offset + delta.Y
+			local left = math.clamp(x - anchor.X * size.X, keep - size.X, math.max(keep - size.X, screenSize.X - keep))
+			local top = math.clamp(y - anchor.Y * size.Y, 0, math.max(0, screenSize.Y - 30))
+			local position = Offset(round(left + anchor.X * size.X), round(top + anchor.Y * size.Y))
 			if position ~= lastPosition then
 				lastPosition = position
-				-- Set directly (no spring): the window sticks to the pointer instead of trailing behind it.
-				snap(target, "Position", position)
+				target.Position = position -- direct, no spring: sticks to the pointer
 			end
-		end, function()
-			self.Moving = false
-			DragDepth -= 1
-			if glowHidden then
-				for _, layer in glow do layer.Visible = true end
-			end
-			if contentHidden then self.Pages.Visible = true end
-		end, function(_, dt)
-			if judged or not self.Moving then return end
-			frames += 1
-			if frames <= 3 then return end -- the first frames of a drag always hitch
-			total += math.min(dt, 0.25)
-			if frames - 3 >= 8 then
-				judged = true
-				local average = total / 8
-				-- Slower than ~38 fps and clearly worse than the same machine when idle: the window itself is the cost.
-				if average > 0.026 and average > IdleDt * 1.35 then
-					self.HeavyDrag = true
-					hideContent()
-				end
-			end
+		end)
+		endConn = UserInputService.InputEnded:Connect(function(ended)
+			if isClick(ended) then finish() end
+		end)
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then finish() end
 		end)
 	end)
 end
@@ -4320,7 +4321,7 @@ function Blossom.new(options)
 		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
-		Visible = true, DragGlow = options.DragGlow ~= false, DragMode = options.DragMode or "Auto", HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
+		Visible = true, DragGlow = options.DragGlow == true, DragMode = options.DragMode or "Full", HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
 		LastPopupTime = 0, DropdownClosedAt = 0, PopupStack = {},
 		Extras = {}, OverlayState = {}, OverlayFaders = {}, OverlayWanted = {},
 		HotkeyOnlyAssigned = options.HotkeyOnlyAssigned == true, HotkeyOnlyEnabled = options.HotkeyOnlyEnabled == true,
