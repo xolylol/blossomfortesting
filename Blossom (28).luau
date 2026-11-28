@@ -48,9 +48,9 @@ local FULL = 99
 
 -- Spacing rule: Pad around every surface, Gap between stacked items. Sizes are even so centring stays on whole pixels.
 local Metrics = {
-	Pad = 10, Gap = 6, SectionGap = 10,
-	Radius = 3, SmallRadius = 2, CardRadius = 4, PillRadius = 5, PopupRadius = 5, FloatRadius = 6, WindowRadius = 6,
-	WindowW = 586, WindowH = 466, MinWindowW = 520, MinWindowH = 380, SidebarW = 141, ContentX = 142, ColumnW = 207,
+	Pad = 11, Gap = 7, SectionGap = 11,
+	Radius = 5, SmallRadius = 4, CardRadius = 6, PillRadius = 7, PopupRadius = 7, FloatRadius = 8, WindowRadius = 9,
+	WindowW = 610, WindowH = 480, MinWindowW = 540, MinWindowH = 390, SidebarW = 148, ContentX = 149, ColumnW = 216,
 	TabW = 121, TabH = 28, TabPitch = 32, CategoryToTab = 25, TabToCategory = 25, FirstCategory = 56, SearchH = 28,
 	Row = 16, HeaderH = 24, HeaderDescH = 40,
 	DividerH = 9, SliderH = 33, DropdownH = 47, InputH = 26, ButtonH = 28, ListRowH = 24,
@@ -181,17 +181,17 @@ local BuiltInThemeJSON = {
 ]] },
 	{ "Blood Moon", [[
 {
-    "Background": "22181c",
-    "Tab": "1c1216",
-    "Outline": "442e36",
-    "Inline": "2c1f24",
-    "Text": "f4e8ea",
-    "InactiveText": "92787e",
-    "Accent": "de5c70",
-    "Element": "281c21",
-    "Gradient": "b0a6a8",
+    "Background": "151820",
+    "Tab": "1b202b",
+    "Outline": "303849",
+    "Inline": "202633",
+    "Text": "edf0f7",
+    "InactiveText": "929bad",
+    "Accent": "9b8cff",
+    "Element": "252c3a",
+    "Gradient": "aeb5c7",
     "Shadow": "000000",
-    "HoveredElement": "463038"
+    "HoveredElement": "343d50"
 }
 ]] },
 }
@@ -264,7 +264,7 @@ local WeightOrder = { "Regular", "Medium", "SemiBold", "Bold" }
 local Current = table.clone(Themes["Blood Moon"] or Themes.Blossom)
 local Casing = "Normal"
 local FontFamily = INTER
-local BodyWeight = Enum.FontWeight.SemiBold
+local BodyWeight = Enum.FontWeight.Medium
 
 local WatermarkOptions = { "Script", "Build", "Name", "FPS", "Ping", "Time", "Session" }
 local WatermarkDefaults = { "Script", "Build", "Name", "FPS", "Ping" }
@@ -284,8 +284,6 @@ local Presets = {
 }
 
 local Active, Tracks, Jobs = {}, {}, {}
-local ensureLoop
-local HoverSet = {}
 local EPS = { number = 0.0015, Color3 = 0.003, UDim2 = 0.4, Vector2 = 0.4 }
 
 local function encode(v)
@@ -313,7 +311,10 @@ local function untrack(entry)
 	end
 end
 
+local ensureLoop
+
 local function animate(target, prop, goal, preset, opts)
+	if ensureLoop then ensureLoop() end
 	local map = Tracks[target]
 	if not map then map = {}; Tracks[target] = map end
 	local entry = map[prop]
@@ -329,7 +330,6 @@ local function animate(target, prop, goal, preset, opts)
 	entry.P = Presets[preset or "Smooth"]
 	entry.Done = opts and opts.Done or nil
 	entry.Step = opts and opts.Step or nil
-	if ensureLoop then ensureLoop() end
 end
 
 local function snap(target, prop, value)
@@ -404,20 +404,12 @@ local FrameConnection
 local sweepHover
 ensureLoop = function()
 	if FrameConnection then return end
-	local hoverClock = 0
 	FrameConnection = RunService.RenderStepped:Connect(function(dt)
-		stepAnimator(dt)
-		for job in Jobs do job(dt) end
-		-- Hover recovery is only needed while a control is actually hovered.
-		-- 20 Hz is sufficient and avoids doing pointer/visibility checks every frame.
-		if next(HoverSet) ~= nil then
-			hoverClock += dt
-			if hoverClock >= 1 / 20 then
-				hoverClock = 0
-				sweepHover()
-			end
+		if #Active > 0 then stepAnimator(dt) end
+		if next(Jobs) ~= nil then
+			for job in Jobs do job(dt) end
 		end
-		-- Do not keep a RenderStepped connection alive while the UI is idle.
+		if next(HoverSet) ~= nil then sweepHover(dt) end
 		if #Active == 0 and next(Jobs) == nil and next(HoverSet) == nil then
 			FrameConnection:Disconnect()
 			FrameConnection = nil
@@ -664,7 +656,7 @@ local function inside(frame, point, margin)
 	return point.X >= p.X - margin and point.X <= p.X + s.X + margin and point.Y >= p.Y - margin and point.Y <= p.Y + s.Y + margin
 end
 
--- Dragging is updated once per rendered frame, independent of input event frequency.
+-- Polls once per rendered frame, so dragging costs one update per frame however fast the mouse reports.
 local function beginDrag(onMove, onEnd, onFrame)
 	local last
 	local function job(dt)
@@ -676,7 +668,7 @@ local function beginDrag(onMove, onEnd, onFrame)
 		if onFrame then onFrame(point, dt) end
 	end
 	Jobs[job] = true
-	ensureLoop()
+	if ensureLoop then ensureLoop() end
 	local ended
 	ended = UserInputService.InputEnded:Connect(function(input)
 		if isClick(input) then
@@ -692,6 +684,7 @@ end
 -- Roblox skips MouseLeave on fast movement and fires MouseEnter for covered objects, so hover
 -- is confirmed against the pointer every frame instead of trusting those events alone.
 local Focus
+local HoverSet = {}
 
 local function isShown(inst)
 	local node = inst
@@ -733,16 +726,20 @@ local function hoverable(inst, onEnter, onLeave)
 		if entered or covered(inst, mousePos()) then return end
 		entered = true
 		HoverSet[inst] = leave
-		ensureLoop()
+		if ensureLoop then ensureLoop() end
 		onEnter()
 	end)
 	inst.MouseLeave:Connect(leave)
 	inst.Destroying:Once(function() HoverSet[inst] = nil end)
 end
 
-function sweepHover()
+local HoverClock = 0
+function sweepHover(dt)
 	if next(HoverSet) == nil then return end
-	if Focus and Focus.Moving then return end
+	if not Focus or not Focus.Visible or Focus.Moving then return end
+	HoverClock += dt or 0
+	if HoverClock < 1 / 24 then return end
+	HoverClock = 0
 	local point = mousePos()
 	for inst, leave in HoverSet do
 		if not inside(inst, point) or not isShown(inst) or covered(inst, point) then leave() end
@@ -756,8 +753,8 @@ end
 local Fader = {}
 Fader.__index = Fader
 
-local function newFader(root, instant)
-	return setmetatable({ Root = root, Alpha = 1, Entries = nil, Instant = instant == true }, Fader)
+local function newFader(root)
+	return setmetatable({ Root = root, Alpha = 1, Entries = nil }, Fader)
 end
 
 local function captureFade(root)
@@ -794,12 +791,6 @@ function Fader:_apply(alpha)
 end
 
 function Fader:Show(onDone, preset)
-	if self.Instant then
-		self.Root.Visible = true
-		self.Entries = nil
-		if onDone then onDone() end
-		return
-	end
 	if not self.Entries then
 		self.Entries = captureFade(self.Root)
 		self.Alpha = 0
@@ -816,12 +807,6 @@ function Fader:Show(onDone, preset)
 end
 
 function Fader:Hide(onDone, preset)
-	if self.Instant then
-		self.Root.Visible = false
-		self.Entries = nil
-		if onDone then onDone() end
-		return
-	end
 	if not self.Entries then
 		self.Entries = captureFade(self.Root)
 		self.Alpha = 1
@@ -1445,6 +1430,10 @@ local function attachColor(section, item, options)
 		mode = mode or "None"
 		if mode == color.Animation then return end
 		color.Animation, color.Phase = mode, 0
+		win.AnimatingColors = false
+		for _, item in win.Colors do
+			if item.Animation ~= "None" then win.AnimatingColors = true; break end
+		end
 		if mode == "None" then color:Set(color.Base) end
 	end
 	-- Rainbow and Pulse start from the picked colour and ease in, so switching them on never jumps.
@@ -2693,7 +2682,9 @@ function Window:RegisterHotkey(object, toggle)
 			accumulated += dt
 			if accumulated < 1 / 15 then return end
 			accumulated = 0
-			for _, step in self.HotkeyPolls do step() end
+			if self.Visible or (self.Hotkeys and self.Hotkeys.Visible) then
+				for _, step in self.HotkeyPolls do step() end
+			end
 		end)
 		table.insert(self.Connections, self.HotkeyPollConnection)
 	end
@@ -2776,8 +2767,9 @@ function Window:SetThemeColor(key, color)
 end
 
 function Window:_flushThemeColors(dt)
+	if next(self.PendingThemeKeys) == nil then return end
 	self.ThemeClock += dt
-	if next(self.PendingThemeKeys) == nil or self.ThemeClock < 1 / 30 then return end
+	if self.ThemeClock < 1 / 30 then return end
 	self.ThemeClock = 0
 	for key in self.PendingThemeKeys do
 		local set = ByKey[key]
@@ -4212,7 +4204,7 @@ function Blossom.new(options)
 		Width = startW, Height = startH, MinSize = minSize, ColumnW = (startW - Metrics.ContentX - Metrics.Pad * 3) / 2,
 		ResizeJobs = {}, ResizeHandles = {},
 		Title = options.Title or "Blossom", Tabs = {}, Sections = {}, Columns = {}, Index = {}, Binds = {}, Colors = {}, Flags = {},
-		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
+		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {}, AnimatingColors = false,
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
 		Visible = true, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
@@ -4225,7 +4217,7 @@ function Blossom.new(options)
 	Blossom.Options, Blossom.Toggles = win.Options, win.Toggles
 	if globalEnv then globalEnv.__BlossomWindow = win end
 
-	local screen = new("ScreenGui", { Name = "Blossom", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 100 })
+	local screen = new("ScreenGui", { Name = "BlossomUI", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 100 })
 	guiParent(screen)
 	win.Screen = screen
 	ScreenRef = screen
@@ -4238,7 +4230,7 @@ function Blossom.new(options)
 	local root = new("Frame", { Bg = "Background", Active = true, Size = Dim2(1, 0, 1, 0), Radius = Metrics.WindowRadius, Border = "Outline" }, holder)
 	addShadow(root, "Large")
 	win.Root = root
-	win.Fader = newFader(holder, true)
+	win.Fader = newFader(holder)
 	-- A Modal button frees the cursor from first-person camera lock while the menu is open.
 	win.ModalButton = new("TextButton", { Modal = true, Size = Offset(1, 1) }, holder)
 
@@ -4352,32 +4344,57 @@ function Blossom.new(options)
 		end
 	end))
 
+	local scrollClock = 0
 	local function perFrame(dt)
-		win:_flushThemeColors(dt)
+		if win.Destroyed then return end
+		local hasThemeWork = next(win.PendingThemeKeys) ~= nil
+		if not win.Visible and not hasThemeWork and not win.OpenDropdown and not win.Search.Dirty and not win.AnimatingColors then return end
+		if hasThemeWork then win:_flushThemeColors(dt) end
 		if win.OpenDropdown then win.OpenDropdown.Follow() end
-		if win.CurrentTab and win.Visible and not win.Moving then
-			for _, column in win:Cols() do
-				local y = column.Scroll.CanvasPosition.Y
-				local showTop, showBottom = y > 1, y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1
-				if showTop ~= column.ShowTop then
-					column.ShowTop = showTop
-					animate(column.FadeTop, "BackgroundTransparency", showTop and 0 or 1, "Fast")
-				end
-				if showBottom ~= column.ShowBottom then
-					column.ShowBottom = showBottom
-					animate(column.FadeBottom, "BackgroundTransparency", showBottom and 0 or 1, "Fast")
+		-- Scroll edge fades are visual polish, not frame-critical. Sample at 12 Hz.
+		if win.Visible and win.CurrentTab and not win.Moving then
+			scrollClock += dt
+			if scrollClock >= 1 / 12 then
+				scrollClock = 0
+				for _, column in win:Cols() do
+					local y = column.Scroll.CanvasPosition.Y
+					local showTop = y > 1
+					local showBottom = y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1
+					if showTop ~= column.ShowTop then
+						column.ShowTop = showTop
+						animate(column.FadeTop, "BackgroundTransparency", showTop and 0 or 1, "Fast")
+					end
+					if showBottom ~= column.ShowBottom then
+						column.ShowBottom = showBottom
+						animate(column.FadeBottom, "BackgroundTransparency", showBottom and 0 or 1, "Fast")
+					end
 				end
 			end
+		else
+			scrollClock = 0
 		end
 		if win.Search.Dirty then
 			win.Search.Dirty = false
 			win.Search.Sync()
 		end
-		for _, color in win.Colors do
-			if color.Animation ~= "None" then color:Step(dt) end
+		-- Animated colour controls are the only reason to visit the colour registry per frame.
+		if win.AnimatingColors then
+			local any = false
+			for _, color in win.Colors do
+				if color.Animation ~= "None" then color:Step(dt); any = true end
+			end
+			win.AnimatingColors = any
 		end
 	end
-	Jobs[perFrame] = true
+	local uiAccumulator = 0
+	table.insert(win.Connections, RunService.Heartbeat:Connect(function(dt)
+		uiAccumulator += dt
+		if uiAccumulator >= 1 / 30 then
+			local elapsed = uiAccumulator
+			uiAccumulator = 0
+			perFrame(elapsed)
+		end
+	end))
 
 	holder.Visible, win.Visible = false, false
 	win.Watermark.Visible, win.Hotkeys.Visible = false, false
