@@ -48,13 +48,13 @@ local FULL = 99
 
 -- Spacing rule: Pad around every surface, Gap between stacked items. Sizes are even so centring stays on whole pixels.
 local Metrics = {
-	-- Spacious proportions for the redesigned main panel. Overlay dimensions remain independent.
+	-- Main panel proportions. Overlay/keybind metrics remain deliberately untouched.
 	Pad = 15, Gap = 9, SectionGap = 16,
-	Radius = 7, SmallRadius = 6, CardRadius = 11, PillRadius = 9, PopupRadius = 8, FloatRadius = 8, WindowRadius = 13,
-	WindowW = 790, WindowH = 590, MinWindowW = 690, MinWindowH = 500, SidebarW = 184, ContentX = 185, ColumnW = 280,
-	TabW = 152, TabH = 36, TabPitch = 41, CategoryToTab = 29, TabToCategory = 28, FirstCategory = 68, SearchH = 34,
-	Row = 19, HeaderH = 29, HeaderDescH = 47,
-	DividerH = 12, SliderH = 42, DropdownH = 57, InputH = 32, ButtonH = 35, ListRowH = 29,
+	Radius = 8, SmallRadius = 6, CardRadius = 12, PillRadius = 9, PopupRadius = 9, FloatRadius = 8, WindowRadius = 14,
+	WindowW = 840, WindowH = 620, MinWindowW = 760, MinWindowH = 540, SidebarW = 196, ContentX = 197, ColumnW = 299,
+	TabW = 164, TabH = 36, TabPitch = 42, CategoryToTab = 29, TabToCategory = 28, FirstCategory = 68, SearchH = 34,
+	Row = 20, HeaderH = 30, HeaderDescH = 48,
+	DividerH = 12, SliderH = 43, DropdownH = 58, InputH = 34, ButtonH = 37, ListRowH = 30,
 	ToggleW = 34, ToggleH = 19, ToggleKnob = 13, Knob = 13, PickerKnob = 9, TrackH = 10, TrackY = 29, TrackInset = 6,
 	ChipH = 19, ValueChipH = 20, Swatch = 17, ChipGap = 3,
 }
@@ -3438,10 +3438,14 @@ function Window:CloseSearch()
 end
 
 function Window:SetVisible(visible)
-	if self.Visible == visible then return end
+	if self.Visible == visible then
+		if self.SetUIUpdateActive then self:SetUIUpdateActive(visible) end
+		return
+	end
 	self.Visible = visible
 	self:CloseFloating()
 	self.ModalButton.Visible = visible
+	if self.SetUIUpdateActive then self:SetUIUpdateActive(visible) end
 	-- Fade only: scaling the window resamples its text, which made the font look thin until the scale was removed.
 	if visible then
 		self.Fader:Show()
@@ -4389,21 +4393,37 @@ function Blossom.new(options)
 			win.AnimatingColors = any
 		end
 	end
+	-- The main UI update loop exists only while the main window is visible.
+	-- Watermark and keybind systems retain their own original update paths.
 	local uiAccumulator = 0
-	table.insert(win.Connections, RunService.Heartbeat:Connect(function(dt)
-		uiAccumulator += dt
-		if uiAccumulator >= 1 / 30 then
-			local elapsed = uiAccumulator
+	win.SetUIUpdateActive = function(self, active)
+		if active then
+			if self.UIUpdateConnection then return end
+			self.UIUpdateConnection = RunService.Heartbeat:Connect(function(dt)
+				if not self.Visible or self.Destroyed then return end
+				uiAccumulator += dt
+				if uiAccumulator >= 1 / 24 then
+					local elapsed = uiAccumulator
+					uiAccumulator = 0
+					perFrame(elapsed)
+				end
+			end)
+			table.insert(self.Connections, self.UIUpdateConnection)
+		else
+			if self.UIUpdateConnection then
+				self.UIUpdateConnection:Disconnect()
+				self.UIUpdateConnection = nil
+			end
 			uiAccumulator = 0
-			perFrame(elapsed)
 		end
-	end))
+	end
 
 	holder.Visible, win.Visible = false, false
 	win.Watermark.Visible, win.Hotkeys.Visible = false, false
 	task.defer(function()
 		if win.Screen.Parent == nil then return end
 		win:SetVisible(true)
+		win:SetUIUpdateActive(true)
 		win.OverlayReady = true
 		for _, frame in { win.Watermark, win.Hotkeys } do win:_fadeOverlay(frame, win.OverlayWanted[frame] ~= false) end
 	end)
