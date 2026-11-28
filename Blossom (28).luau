@@ -49,21 +49,21 @@ local FULL = 99
 -- Spacing rule: Pad around every surface, Gap between stacked items. Sizes are even so centring stays on whole pixels.
 local Metrics = {
 	-- Main panel proportions. Overlay/keybind metrics remain deliberately untouched.
-	Pad = 15, Gap = 9, SectionGap = 16,
-	Radius = 8, SmallRadius = 6, CardRadius = 12, PillRadius = 9, PopupRadius = 9, FloatRadius = 8, WindowRadius = 14,
-	WindowW = 840, WindowH = 620, MinWindowW = 760, MinWindowH = 540, SidebarW = 196, ContentX = 197, ColumnW = 299,
-	TabW = 164, TabH = 36, TabPitch = 42, CategoryToTab = 29, TabToCategory = 28, FirstCategory = 68, SearchH = 34,
-	Row = 20, HeaderH = 30, HeaderDescH = 48,
-	DividerH = 12, SliderH = 43, DropdownH = 58, InputH = 34, ButtonH = 37, ListRowH = 30,
+	Pad = 14, Gap = 8, SectionGap = 13,
+	Radius = 7, SmallRadius = 5, CardRadius = 11, PillRadius = 9, PopupRadius = 8, FloatRadius = 9, WindowRadius = 14,
+	WindowW = 760, WindowH = 560, MinWindowW = 680, MinWindowH = 500, SidebarW = 184, ContentX = 185, ColumnW = 266,
+	TabW = 152, TabH = 36, TabPitch = 42, CategoryToTab = 27, TabToCategory = 27, FirstCategory = 88, SearchH = 34,
+	Row = 19, HeaderH = 29, HeaderDescH = 46,
+	DividerH = 11, SliderH = 39, DropdownH = 54, InputH = 32, ButtonH = 35, ListRowH = 28,
 	ToggleW = 34, ToggleH = 19, ToggleKnob = 13, Knob = 13, PickerKnob = 9, TrackH = 10, TrackY = 29, TrackInset = 6,
 	ChipH = 19, ValueChipH = 20, Swatch = 17, ChipGap = 3,
 }
 
 local Themes = {
 	Blossom = {
-		Background = RGB(42, 44, 52), Tab = RGB(48, 50, 58), Outline = RGB(65, 68, 80), Inline = RGB(56, 58, 68),
-		Text = RGB(232, 234, 245), InactiveText = RGB(126, 130, 148), Accent = RGB(113, 159, 226), Element = RGB(54, 57, 68),
-		Gradient = RGB(172, 187, 209), Shadow = RGB(0, 0, 0), HoveredElement = RGB(72, 77, 90),
+		Background = RGB(19, 20, 28), Tab = RGB(23, 24, 34), Outline = RGB(47, 49, 63), Inline = RGB(27, 29, 40),
+		Text = RGB(240, 241, 248), InactiveText = RGB(151, 155, 174), Accent = RGB(165, 139, 255), Element = RGB(31, 33, 46),
+		Gradient = RGB(190, 181, 225), Shadow = RGB(0, 0, 0), HoveredElement = RGB(45, 47, 63),
 	},
 	Afterglow = {
 		Background = RGB(34, 28, 25), Tab = RGB(30, 23, 20), Outline = RGB(60, 46, 38), Inline = RGB(42, 33, 29),
@@ -2391,12 +2391,13 @@ end
 
 local SUB_BAR, SUB_H = 24, 32
 
-local function buildColumns(win, owner, parent)
+local function buildColumns(win, owner, parent, topInset)
 	owner.Columns = {}
+	topInset = topInset or 0
 	for index = 1, 2 do
 		local scroll = new("ScrollingFrame", {
-			Position = Offset(Metrics.Pad + (index - 1) * (win.ColumnW + Metrics.Pad), 0),
-			Size = Dim2(0, win.ColumnW, 1, 0), ScrollBarThickness = 0, CanvasSize = Offset(0, 0),
+			Position = Offset(Metrics.Pad + (index - 1) * (win.ColumnW + Metrics.Pad), topInset),
+			Size = Dim2(0, win.ColumnW, 1, -topInset), ScrollBarThickness = 0, CanvasSize = Offset(0, 0),
 			ScrollingEnabled = not UserInputService.MouseEnabled, ClipsDescendants = true,
 		}, parent)
 		local column = setmetatable({ Scroll = scroll, Sections = {}, Target = 0, ContentH = 0, Tab = owner, Index = index, ShowTop = false, ShowBottom = false }, Column)
@@ -2494,7 +2495,7 @@ function Window:Tab(options)
 	self.SidebarY = y
 
 	local tab = setmetatable({ Window = self, Name = options.Name, Y = y - Metrics.TabH / 2 }, Tab)
-	local button = new("TextButton", { Position = Offset(Metrics.Pad, tab.Y), Size = Offset(Metrics.TabW, Metrics.TabH), ZIndex = 2 }, self.Sidebar)
+	local button = new("TextButton", { Position = Offset(Metrics.Pad, tab.Y), Size = Offset(Metrics.TabW, Metrics.TabH), ZIndex = 2, Radius = Metrics.PillRadius }, self.Sidebar)
 	tab.Button = button
 	local hovering = false
 	local isActive = function() return self.CurrentTab == tab end
@@ -2505,7 +2506,10 @@ function Window:Tab(options)
 	tab.LabelY = tab.Label.Position.Y.Offset
 
 	tab.Page = new("Frame", { Name = options.Name, Size = Dim2(1, 0, 1, 0), Visible = false }, self.Pages)
-	buildColumns(self, tab, tab.Page)
+	local pageHeader = new("Frame", { Name = "PageHeader", Size = Dim2(1, 0, 0, 38) }, tab.Page)
+	makeIcon(pageHeader, options.Icon or "cube", 17, "Accent", "Tab", { Position = Offset(1, 9) })
+	label(pageHeader, { Text = options.Name, TextSize = 15, Weight = Enum.FontWeight.Semibold, X = 27, Y = 0, RowH = 36, W = 260, Truncate = Enum.TextTruncate.AtEnd })
+	buildColumns(self, tab, tab.Page, 42)
 
 	local function paint()
 		tab.Icon.Update()
