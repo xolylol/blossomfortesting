@@ -48,14 +48,15 @@ local FULL = 99
 
 -- Spacing rule: Pad around every surface, Gap between stacked items. Sizes are even so centring stays on whole pixels.
 local Metrics = {
-	Pad = 11, Gap = 7, SectionGap = 11,
-	Radius = 5, SmallRadius = 4, CardRadius = 6, PillRadius = 7, PopupRadius = 7, FloatRadius = 8, WindowRadius = 9,
-	WindowW = 610, WindowH = 480, MinWindowW = 540, MinWindowH = 390, SidebarW = 148, ContentX = 149, ColumnW = 216,
-	TabW = 121, TabH = 28, TabPitch = 32, CategoryToTab = 25, TabToCategory = 25, FirstCategory = 56, SearchH = 28,
-	Row = 16, HeaderH = 24, HeaderDescH = 40,
-	DividerH = 9, SliderH = 33, DropdownH = 47, InputH = 26, ButtonH = 28, ListRowH = 24,
-	ToggleW = 28, ToggleH = 16, ToggleKnob = 10, Knob = 11, PickerKnob = 8, TrackH = 9, TrackY = 24, TrackInset = 5,
-	ChipH = 16, ValueChipH = 17, Swatch = 14, ChipGap = 2,
+	-- Spacious proportions for the redesigned main panel. Overlay dimensions remain independent.
+	Pad = 15, Gap = 9, SectionGap = 16,
+	Radius = 7, SmallRadius = 6, CardRadius = 11, PillRadius = 9, PopupRadius = 8, FloatRadius = 8, WindowRadius = 13,
+	WindowW = 790, WindowH = 590, MinWindowW = 690, MinWindowH = 500, SidebarW = 184, ContentX = 185, ColumnW = 280,
+	TabW = 152, TabH = 36, TabPitch = 41, CategoryToTab = 29, TabToCategory = 28, FirstCategory = 68, SearchH = 34,
+	Row = 19, HeaderH = 29, HeaderDescH = 47,
+	DividerH = 12, SliderH = 42, DropdownH = 57, InputH = 32, ButtonH = 35, ListRowH = 29,
+	ToggleW = 34, ToggleH = 19, ToggleKnob = 13, Knob = 13, PickerKnob = 9, TrackH = 10, TrackY = 29, TrackInset = 6,
+	ChipH = 19, ValueChipH = 20, Swatch = 17, ChipGap = 3,
 }
 
 local Themes = {
@@ -181,17 +182,17 @@ local BuiltInThemeJSON = {
 ]] },
 	{ "Blood Moon", [[
 {
-    "Background": "151820",
-    "Tab": "1b202b",
-    "Outline": "303849",
-    "Inline": "202633",
-    "Text": "edf0f7",
-    "InactiveText": "929bad",
-    "Accent": "9b8cff",
-    "Element": "252c3a",
-    "Gradient": "aeb5c7",
+    "Background": "101117",
+    "Tab": "171923",
+    "Outline": "303442",
+    "Inline": "1d202b",
+    "Text": "f1f2f8",
+    "InactiveText": "9298aa",
+    "Accent": "a78bfa",
+    "Element": "272b38",
+    "Gradient": "c0b6e8",
     "Shadow": "000000",
-    "HoveredElement": "343d50"
+    "HoveredElement": "373c4d"
 }
 ]] },
 }
@@ -2482,7 +2483,7 @@ end
 
 function Window:Category(name)
 	local y = self.SidebarY + (self.SidebarHasTabs and Metrics.TabToCategory or 0)
-	label(self.Sidebar, { Fg = "InactiveText", Text = name, TextSize = 9, X = Metrics.Pad, RowH = 12, Y = y - 6, W = 120 })
+	label(self.Sidebar, { Fg = "InactiveText", Text = string.upper(name), TextSize = 10, Weight = Enum.FontWeight.SemiBold, X = Metrics.Pad + 2, RowH = 14, Y = y - 7, W = Metrics.SidebarW - Metrics.Pad * 2 })
 	self.SidebarY = y
 	self.SidebarAfterCategory = true
 end
@@ -2499,8 +2500,8 @@ function Window:Tab(options)
 	local isActive = function() return self.CurrentTab == tab end
 	local color = function() return (isActive() or hovering) and Current.Text or Current.InactiveText end
 	local hole = function() return isActive() and Current.Inline or Current.Background end
-	tab.Icon = makeIcon(button, options.Icon or "cube", 16, color, hole, { Position = Offset(6, 6) })
-	tab.Label = label(button, { Text = options.Name, X = 33, TextSize = 13, RowH = Metrics.TabH, Fg = color, Right = 6, Truncate = Enum.TextTruncate.AtEnd })
+	tab.Icon = makeIcon(button, options.Icon or "cube", 18, color, hole, { Position = Offset(9, 9) })
+	tab.Label = label(button, { Text = options.Name, X = 38, TextSize = 14, RowH = Metrics.TabH, Fg = color, Right = 8, Truncate = Enum.TextTruncate.AtEnd })
 	tab.LabelY = tab.Label.Position.Y.Offset
 
 	tab.Page = new("Frame", { Name = options.Name, Size = Dim2(1, 0, 1, 0), Visible = false }, self.Pages)
@@ -2509,7 +2510,7 @@ function Window:Tab(options)
 	local function paint()
 		tab.Icon.Update()
 		refresh(tab.Label)
-		animate(tab.Label, "Position", Offset(hovering and not isActive() and 35 or 33, tab.LabelY), "Smooth")
+		animate(tab.Label, "Position", Offset(hovering and not isActive() and 40 or 38, tab.LabelY), "Smooth")
 	end
 	tab.Paint = paint
 	hoverable(button, function() hovering = true; paint() end, function() hovering = false; paint() end)
@@ -4234,10 +4235,12 @@ function Blossom.new(options)
 	-- A Modal button frees the cursor from first-person camera lock while the menu is open.
 	win.ModalButton = new("TextButton", { Modal = true, Size = Offset(1, 1) }, holder)
 
-	local sidebar = new("Frame", { Size = Dim2(0, Metrics.SidebarW, 1, 0) }, root)
+	local sidebar = new("Frame", { Bg = "Background", Size = Dim2(0, Metrics.SidebarW, 1, 0) }, root)
 	win.Sidebar = sidebar
-	makeIcon(sidebar, "logo", 20, "Accent", "Background", { Position = Offset(Metrics.Pad * 2, 15) })
-	label(sidebar, { Text = win.Title, TextSize = 16, Weight = Enum.FontWeight.Bold, X = 51, Y = 11, RowH = 28, W = 85 })
+	makeIcon(sidebar, "logo", 24, "Accent", "Background", { Position = Offset(Metrics.Pad * 2, 18) })
+	label(sidebar, { Text = win.Title, TextSize = 17, Weight = Enum.FontWeight.Bold, X = 57, Y = 15, RowH = 26, W = 112 })
+	label(sidebar, { Text = "CONTROL CENTER", TextSize = 9, Weight = Enum.FontWeight.SemiBold, Fg = "InactiveText", X = 57, Y = 36, RowH = 13, W = 112 })
+	new("Frame", { Bg = "Outline", Position = Offset(Metrics.Pad, 58), Size = Dim2(1, -Metrics.Pad * 2, 0, 1) }, sidebar)
 	win.Indicator = new("Frame", { Bg = "Inline", Size = Offset(Metrics.TabW - 2, Metrics.TabH - 2), Radius = Metrics.PillRadius, Border = "Outline", Visible = false }, sidebar)
 	local searchButton = new("TextButton", {
 		Position = Dim2(0, Metrics.Pad + 1, 1, -(Metrics.Pad + Metrics.SearchH) + 1), Size = Offset(Metrics.TabW - 2, Metrics.SearchH - 2), Radius = Metrics.PillRadius, Border = "Outline", BackgroundTransparency = 0,
