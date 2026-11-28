@@ -32,6 +32,9 @@
 
 	Options for Blossom.new: Title, Script, Build, Theme, MenuKey, Font (a font family string),
 	Size and MinSize (Vector2), Resizable (default true). Window:SetSize(width, height) resizes from code.
+
+	LITE MODE: set Lite = true below (default) for a very light UI: no animations, no gradients, no icon geometry, no fades.
+	The watermark and the hotkey list are exempt and keep their full look and behaviour. Lite = false gives the full version.
 ]]
 
 local Players = game:GetService("Players")
@@ -46,24 +49,34 @@ local RGB = Color3.fromRGB
 local floor, round, abs = math.floor, math.round, math.abs
 local FULL = 99
 
+local Lite = true          -- false = full version
+local Exempt = {}          -- watermark and hotkey list: never lightened
+
+local function isExempt(inst)
+	if typeof(inst) ~= "Instance" then return false end
+	for root in Exempt do
+		if inst == root or inst:IsDescendantOf(root) then return true end
+	end
+	return false
+end
+
 -- Spacing rule: Pad around every surface, Gap between stacked items. Sizes are even so centring stays on whole pixels.
 local Metrics = {
-	-- Main panel proportions. Overlay/keybind metrics remain deliberately untouched.
-	Pad = 14, Gap = 8, SectionGap = 13,
-	Radius = 7, SmallRadius = 5, CardRadius = 11, PillRadius = 9, PopupRadius = 8, FloatRadius = 9, WindowRadius = 14,
-	WindowW = 760, WindowH = 560, MinWindowW = 680, MinWindowH = 500, SidebarW = 184, ContentX = 185, ColumnW = 266,
-	TabW = 152, TabH = 36, TabPitch = 42, CategoryToTab = 27, TabToCategory = 27, FirstCategory = 88, SearchH = 34,
-	Row = 19, HeaderH = 29, HeaderDescH = 46,
-	DividerH = 11, SliderH = 39, DropdownH = 54, InputH = 32, ButtonH = 35, ListRowH = 28,
-	ToggleW = 34, ToggleH = 19, ToggleKnob = 13, Knob = 13, PickerKnob = 9, TrackH = 10, TrackY = 29, TrackInset = 6,
-	ChipH = 19, ValueChipH = 20, Swatch = 17, ChipGap = 3,
+	Pad = 10, Gap = 6, SectionGap = 10,
+	Radius = 3, SmallRadius = 2, CardRadius = 4, PillRadius = 5, PopupRadius = 5, FloatRadius = 6, WindowRadius = 6,
+	WindowW = 586, WindowH = 466, MinWindowW = 520, MinWindowH = 380, SidebarW = 141, ContentX = 142, ColumnW = 207,
+	TabW = 121, TabH = 28, TabPitch = 32, CategoryToTab = 25, TabToCategory = 25, FirstCategory = 56, SearchH = 28,
+	Row = 16, HeaderH = 24, HeaderDescH = 40,
+	DividerH = 9, SliderH = 33, DropdownH = 47, InputH = 26, ButtonH = 28, ListRowH = 24,
+	ToggleW = 28, ToggleH = 16, ToggleKnob = 10, Knob = 11, PickerKnob = 8, TrackH = 9, TrackY = 24, TrackInset = 5,
+	ChipH = 16, ValueChipH = 17, Swatch = 14, ChipGap = 2,
 }
 
 local Themes = {
 	Blossom = {
-		Background = RGB(19, 20, 28), Tab = RGB(23, 24, 34), Outline = RGB(47, 49, 63), Inline = RGB(27, 29, 40),
-		Text = RGB(240, 241, 248), InactiveText = RGB(151, 155, 174), Accent = RGB(165, 139, 255), Element = RGB(31, 33, 46),
-		Gradient = RGB(190, 181, 225), Shadow = RGB(0, 0, 0), HoveredElement = RGB(45, 47, 63),
+		Background = RGB(42, 44, 52), Tab = RGB(48, 50, 58), Outline = RGB(65, 68, 80), Inline = RGB(56, 58, 68),
+		Text = RGB(232, 234, 245), InactiveText = RGB(126, 130, 148), Accent = RGB(113, 159, 226), Element = RGB(54, 57, 68),
+		Gradient = RGB(172, 187, 209), Shadow = RGB(0, 0, 0), HoveredElement = RGB(72, 77, 90),
 	},
 	Afterglow = {
 		Background = RGB(34, 28, 25), Tab = RGB(30, 23, 20), Outline = RGB(60, 46, 38), Inline = RGB(42, 33, 29),
@@ -182,17 +195,17 @@ local BuiltInThemeJSON = {
 ]] },
 	{ "Blood Moon", [[
 {
-    "Background": "101117",
-    "Tab": "171923",
-    "Outline": "303442",
-    "Inline": "1d202b",
-    "Text": "f1f2f8",
-    "InactiveText": "9298aa",
-    "Accent": "a78bfa",
-    "Element": "272b38",
-    "Gradient": "c0b6e8",
+    "Background": "22181c",
+    "Tab": "1c1216",
+    "Outline": "442e36",
+    "Inline": "2c1f24",
+    "Text": "f4e8ea",
+    "InactiveText": "92787e",
+    "Accent": "de5c70",
+    "Element": "281c21",
+    "Gradient": "b0a6a8",
     "Shadow": "000000",
-    "HoveredElement": "373c4d"
+    "HoveredElement": "463038"
 }
 ]] },
 }
@@ -265,7 +278,7 @@ local WeightOrder = { "Regular", "Medium", "SemiBold", "Bold" }
 local Current = table.clone(Themes["Blood Moon"] or Themes.Blossom)
 local Casing = "Normal"
 local FontFamily = INTER
-local BodyWeight = Enum.FontWeight.Medium
+local BodyWeight = Enum.FontWeight.SemiBold
 
 local WatermarkOptions = { "Script", "Build", "Name", "FPS", "Ping", "Time", "Session" }
 local WatermarkDefaults = { "Script", "Build", "Name", "FPS", "Ping" }
@@ -312,10 +325,19 @@ local function untrack(entry)
 	end
 end
 
-local ensureLoop
-
 local function animate(target, prop, goal, preset, opts)
-	if ensureLoop then ensureLoop() end
+	-- Lite: everything jumps straight to its goal (watermark and hotkey list keep their springs).
+	if Lite and not isExempt(target) then
+		local m = Tracks[target]
+		local e = m and m[prop]
+		if e then untrack(e) end
+		target[prop] = goal
+		if opts then
+			if opts.Step then opts.Step(goal) end
+			if opts.Done then task.spawn(opts.Done) end
+		end
+		return
+	end
 	local map = Tracks[target]
 	if not map then map = {}; Tracks[target] = map end
 	local entry = map[prop]
@@ -403,18 +425,12 @@ end
 
 local FrameConnection
 local sweepHover
-ensureLoop = function()
+local function ensureLoop()
 	if FrameConnection then return end
 	FrameConnection = RunService.RenderStepped:Connect(function(dt)
-		if #Active > 0 then stepAnimator(dt) end
-		if next(Jobs) ~= nil then
-			for job in Jobs do job(dt) end
-		end
-		if next(HoverSet) ~= nil then sweepHover(dt) end
-		if #Active == 0 and next(Jobs) == nil and next(HoverSet) == nil then
-			FrameConnection:Disconnect()
-			FrameConnection = nil
-		end
+		stepAnimator(dt)
+		for job in Jobs do job(dt) end
+		sweepHover()
 	end)
 end
 
@@ -597,6 +613,7 @@ local function centeredLabel(parent, width, o)
 end
 
 local function addGradient(inst)
+	if Lite and not isExempt(inst) then return nil end
 	local gradient = Instance.new("UIGradient")
 	gradient.Rotation = 90
 	bind(gradient, "Color", function() return ColorSequence.new(Color3.new(1, 1, 1), Current.Gradient) end)
@@ -616,6 +633,7 @@ local ShadowsAvailable = pcall(function() Instance.new("UIShadow"):Destroy() end
 local function addShadow(inst, style)
 	-- Window/popup glow removed: fewer frames, nothing extra to draw while dragging.
 	if style == "Large" then return nil end
+	if Lite then return nil end
 	if not ShadowsAvailable then return nil end
 	local preset = Shadows[style]
 	local shadow = Instance.new("UIShadow")
@@ -669,7 +687,6 @@ local function beginDrag(onMove, onEnd, onFrame)
 		if onFrame then onFrame(point, dt) end
 	end
 	Jobs[job] = true
-	if ensureLoop then ensureLoop() end
 	local ended
 	ended = UserInputService.InputEnded:Connect(function(input)
 		if isClick(input) then
@@ -727,20 +744,15 @@ local function hoverable(inst, onEnter, onLeave)
 		if entered or covered(inst, mousePos()) then return end
 		entered = true
 		HoverSet[inst] = leave
-		if ensureLoop then ensureLoop() end
 		onEnter()
 	end)
 	inst.MouseLeave:Connect(leave)
 	inst.Destroying:Once(function() HoverSet[inst] = nil end)
 end
 
-local HoverClock = 0
-function sweepHover(dt)
+function sweepHover()
 	if next(HoverSet) == nil then return end
-	if not Focus or not Focus.Visible or Focus.Moving then return end
-	HoverClock += dt or 0
-	if HoverClock < 1 / 24 then return end
-	HoverClock = 0
+	if Focus and Focus.Moving then return end
 	local point = mousePos()
 	for inst, leave in HoverSet do
 		if not inside(inst, point) or not isShown(inst) or covered(inst, point) then leave() end
@@ -792,6 +804,11 @@ function Fader:_apply(alpha)
 end
 
 function Fader:Show(onDone, preset)
+	if Lite and not isExempt(self.Root) then
+		self.Root.Visible = true
+		if onDone then onDone() end
+		return
+	end
 	if not self.Entries then
 		self.Entries = captureFade(self.Root)
 		self.Alpha = 0
@@ -808,6 +825,11 @@ function Fader:Show(onDone, preset)
 end
 
 function Fader:Hide(onDone, preset)
+	if Lite and not isExempt(self.Root) then
+		self.Root.Visible = false
+		if onDone then onDone() end
+		return
+	end
 	if not self.Entries then
 		self.Entries = captureFade(self.Root)
 		self.Alpha = 1
@@ -1140,6 +1162,11 @@ end
 
 local function makeIcon(parent, name, size, color, hole, props)
 	props = props or {}
+	-- Lite: icons are empty placeholders (same size, no geometry, no download).
+	if Lite and not isExempt(parent) then
+		local stub = new("Frame", { Name = "Icon", Size = Offset(size, size), Position = props.Position, AnchorPoint = props.AnchorPoint, ZIndex = props.ZIndex }, parent)
+		return { Root = stub, Parts = {}, Update = function() end }
+	end
 	local root = new("Frame", { Name = "Icon", Size = Offset(size, size), Position = props.Position, AnchorPoint = props.AnchorPoint, ZIndex = props.ZIndex }, parent)
 	local icon = { Root = root, Parts = {} }
 	function icon.Update(preset)
@@ -1431,10 +1458,6 @@ local function attachColor(section, item, options)
 		mode = mode or "None"
 		if mode == color.Animation then return end
 		color.Animation, color.Phase = mode, 0
-		win.AnimatingColors = false
-		for _, item in win.Colors do
-			if item.Animation ~= "None" then win.AnimatingColors = true; break end
-		end
 		if mode == "None" then color:Set(color.Base) end
 	end
 	-- Rainbow and Pulse start from the picked colour and ease in, so switching them on never jumps.
@@ -2391,13 +2414,12 @@ end
 
 local SUB_BAR, SUB_H = 24, 32
 
-local function buildColumns(win, owner, parent, topInset)
+local function buildColumns(win, owner, parent)
 	owner.Columns = {}
-	topInset = topInset or 0
 	for index = 1, 2 do
 		local scroll = new("ScrollingFrame", {
-			Position = Offset(Metrics.Pad + (index - 1) * (win.ColumnW + Metrics.Pad), topInset),
-			Size = Dim2(0, win.ColumnW, 1, -topInset), ScrollBarThickness = 0, CanvasSize = Offset(0, 0),
+			Position = Offset(Metrics.Pad + (index - 1) * (win.ColumnW + Metrics.Pad), 0),
+			Size = Dim2(0, win.ColumnW, 1, 0), ScrollBarThickness = 0, CanvasSize = Offset(0, 0),
 			ScrollingEnabled = not UserInputService.MouseEnabled, ClipsDescendants = true,
 		}, parent)
 		local column = setmetatable({ Scroll = scroll, Sections = {}, Target = 0, ContentH = 0, Tab = owner, Index = index, ShowTop = false, ShowBottom = false }, Column)
@@ -2484,7 +2506,7 @@ end
 
 function Window:Category(name)
 	local y = self.SidebarY + (self.SidebarHasTabs and Metrics.TabToCategory or 0)
-	label(self.Sidebar, { Fg = "InactiveText", Text = string.upper(name), TextSize = 10, Weight = Enum.FontWeight.SemiBold, X = Metrics.Pad + 2, RowH = 14, Y = y - 7, W = Metrics.SidebarW - Metrics.Pad * 2 })
+	label(self.Sidebar, { Fg = "InactiveText", Text = name, TextSize = 9, X = Metrics.Pad, RowH = 12, Y = y - 6, W = 120 })
 	self.SidebarY = y
 	self.SidebarAfterCategory = true
 end
@@ -2495,26 +2517,23 @@ function Window:Tab(options)
 	self.SidebarY = y
 
 	local tab = setmetatable({ Window = self, Name = options.Name, Y = y - Metrics.TabH / 2 }, Tab)
-	local button = new("TextButton", { Position = Offset(Metrics.Pad, tab.Y), Size = Offset(Metrics.TabW, Metrics.TabH), ZIndex = 2, Radius = Metrics.PillRadius }, self.Sidebar)
+	local button = new("TextButton", { Position = Offset(Metrics.Pad, tab.Y), Size = Offset(Metrics.TabW, Metrics.TabH), ZIndex = 2 }, self.Sidebar)
 	tab.Button = button
 	local hovering = false
 	local isActive = function() return self.CurrentTab == tab end
 	local color = function() return (isActive() or hovering) and Current.Text or Current.InactiveText end
 	local hole = function() return isActive() and Current.Inline or Current.Background end
-	tab.Icon = makeIcon(button, options.Icon or "cube", 18, color, hole, { Position = Offset(9, 9) })
-	tab.Label = label(button, { Text = options.Name, X = 38, TextSize = 14, RowH = Metrics.TabH, Fg = color, Right = 8, Truncate = Enum.TextTruncate.AtEnd })
+	tab.Icon = makeIcon(button, options.Icon or "cube", 16, color, hole, { Position = Offset(6, 6) })
+	tab.Label = label(button, { Text = options.Name, X = 33, TextSize = 13, RowH = Metrics.TabH, Fg = color, Right = 6, Truncate = Enum.TextTruncate.AtEnd })
 	tab.LabelY = tab.Label.Position.Y.Offset
 
 	tab.Page = new("Frame", { Name = options.Name, Size = Dim2(1, 0, 1, 0), Visible = false }, self.Pages)
-	local pageHeader = new("Frame", { Name = "PageHeader", Size = Dim2(1, 0, 0, 38) }, tab.Page)
-	makeIcon(pageHeader, options.Icon or "cube", 17, "Accent", "Tab", { Position = Offset(1, 9) })
-	label(pageHeader, { Text = options.Name, TextSize = 15, Weight = Enum.FontWeight.Semibold, X = 27, Y = 0, RowH = 36, W = 260, Truncate = Enum.TextTruncate.AtEnd })
-	buildColumns(self, tab, tab.Page, 42)
+	buildColumns(self, tab, tab.Page)
 
 	local function paint()
 		tab.Icon.Update()
 		refresh(tab.Label)
-		animate(tab.Label, "Position", Offset(hovering and not isActive() and 40 or 38, tab.LabelY), "Smooth")
+		animate(tab.Label, "Position", Offset(hovering and not isActive() and 35 or 33, tab.LabelY), "Smooth")
 	end
 	tab.Paint = paint
 	hoverable(button, function() hovering = true; paint() end, function() hovering = false; paint() end)
@@ -2687,9 +2706,7 @@ function Window:RegisterHotkey(object, toggle)
 			accumulated += dt
 			if accumulated < 1 / 15 then return end
 			accumulated = 0
-			if self.Visible or (self.Hotkeys and self.Hotkeys.Visible) then
-				for _, step in self.HotkeyPolls do step() end
-			end
+			for _, step in self.HotkeyPolls do step() end
 		end)
 		table.insert(self.Connections, self.HotkeyPollConnection)
 	end
@@ -2772,9 +2789,8 @@ function Window:SetThemeColor(key, color)
 end
 
 function Window:_flushThemeColors(dt)
-	if next(self.PendingThemeKeys) == nil then return end
 	self.ThemeClock += dt
-	if self.ThemeClock < 1 / 30 then return end
+	if next(self.PendingThemeKeys) == nil or self.ThemeClock < 1 / 30 then return end
 	self.ThemeClock = 0
 	for key in self.PendingThemeKeys do
 		local set = ByKey[key]
@@ -3185,7 +3201,7 @@ function Window:_buildPicker()
 	-- A CanvasGroup is the only container whose UICorner clips its children, so the square
 	-- checker cells stay inside the rounded ends.
 	local alphaClip = new("CanvasGroup", { Name = "AlphaClip", BackgroundTransparency = 0, BackgroundColor3 = Color3.new(1, 1, 1), Size = Dim2(1, 0, 1, 0), Radius = Metrics.Radius }, alphaBar)
-	for column = 0, 48 do
+	for column = 0, Lite and -1 or 48 do
 		for row = 0, 2 do
 			if (column + row) % 2 == 1 then
 				new("Frame", { BackgroundTransparency = 0, BackgroundColor3 = RGB(190, 190, 190), Position = Offset(column * 4, row * 4), Size = Offset(4, 4) }, alphaClip)
@@ -3442,14 +3458,10 @@ function Window:CloseSearch()
 end
 
 function Window:SetVisible(visible)
-	if self.Visible == visible then
-		if self.SetUIUpdateActive then self:SetUIUpdateActive(visible) end
-		return
-	end
+	if self.Visible == visible then return end
 	self.Visible = visible
 	self:CloseFloating()
 	self.ModalButton.Visible = visible
-	if self.SetUIUpdateActive then self:SetUIUpdateActive(visible) end
 	-- Fade only: scaling the window resamples its text, which made the font look thin until the scale was removed.
 	if visible then
 		self.Fader:Show()
@@ -3990,6 +4002,7 @@ end
 function Window:_buildWatermark(options)
 	local player = Players.LocalPlayer
 	local frame = new("Frame", { Bg = "Background", Size = Offset(298, 28), Radius = Metrics.FloatRadius, Border = "Outline", Active = true }, self.Screen)
+	Exempt[frame] = true -- watermark keeps its full look in Lite mode
 	makeIcon(frame, "logo", 16, "Accent", "Background", { Position = Offset(8, 6) })
 	self.Watermark = frame
 	local show, order, parts, layout = {}, {}, {}
@@ -4108,6 +4121,7 @@ end
 
 function Window:_buildHotkeys()
 	local holder = new("Frame", { Size = Offset(200, 300) }, self.Screen)
+	Exempt[holder] = true -- hotkey list keeps its full look in Lite mode
 	local head = new("Frame", { Bg = "Background", Position = Offset(1, 1), Size = Offset(88, 25), Radius = Metrics.FloatRadius, Border = "Outline", Active = true }, holder)
 	makeIcon(head, "keyboard", 14, "Accent", "Background", { Position = Offset(9, 5) })
 	local text = label(head, { Text = "Hotkeys", TextSize = 12, Weight = Enum.FontWeight.SemiBold, X = 31, RowH = 25 })
@@ -4166,6 +4180,7 @@ function Window:Destroy()
 	for _, entry in Active do entry.Dead = true end
 	table.clear(Active)
 	table.clear(Tracks)
+	table.clear(Exempt)
 	if FrameConnection then
 		FrameConnection:Disconnect()
 		FrameConnection = nil
@@ -4196,6 +4211,7 @@ function Blossom.new(options)
 	if options.Font then FontFamily = Fonts[options.Font] or options.Font end
 	if options.IconBase then IconBase = type(options.IconBase) == "table" and options.IconBase or { options.IconBase } end
 	if options.IconStroke then IconStroke = options.IconStroke end
+	if options.Lite ~= nil then Lite = options.Lite == true end
 	local minSize = options.MinSize or Vec2(Metrics.MinWindowW, Metrics.MinWindowH)
 	minSize = Vec2(minSize.X - minSize.X % 2, minSize.Y - minSize.Y % 2)
 	local startSize = options.Size or Vec2(Metrics.WindowW, Metrics.WindowH)
@@ -4213,7 +4229,7 @@ function Blossom.new(options)
 		Width = startW, Height = startH, MinSize = minSize, ColumnW = (startW - Metrics.ContentX - Metrics.Pad * 3) / 2,
 		ResizeJobs = {}, ResizeHandles = {},
 		Title = options.Title or "Blossom", Tabs = {}, Sections = {}, Columns = {}, Index = {}, Binds = {}, Colors = {}, Flags = {},
-		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {}, AnimatingColors = false,
+		ThemeRows = {}, HotkeyEntries = {}, HotkeyOrder = {}, NotifyStack = {}, Connections = {}, Moved = {}, PendingThemeKeys = {}, Options = {}, Toggles = {}, UnloadCallbacks = {},
 		ThemeClock = 0, SidebarY = Metrics.FirstCategory, SidebarHasTabs = false, SidebarAfterCategory = false,
 		DPI = 1, ScaleTargets = {}, BaseMinSize = minSize,
 		Visible = true, HideUnload = options.HideUnload == true, ThemeName = options.Theme or (Themes["Blood Moon"] and "Blood Moon" or "Blossom"), MenuKey = options.MenuKey or Enum.KeyCode.RightShift,
@@ -4226,7 +4242,7 @@ function Blossom.new(options)
 	Blossom.Options, Blossom.Toggles = win.Options, win.Toggles
 	if globalEnv then globalEnv.__BlossomWindow = win end
 
-	local screen = new("ScreenGui", { Name = "BlossomUI", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 100 })
+	local screen = new("ScreenGui", { Name = "Blossom", ResetOnSpawn = false, IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 100 })
 	guiParent(screen)
 	win.Screen = screen
 	ScreenRef = screen
@@ -4243,12 +4259,10 @@ function Blossom.new(options)
 	-- A Modal button frees the cursor from first-person camera lock while the menu is open.
 	win.ModalButton = new("TextButton", { Modal = true, Size = Offset(1, 1) }, holder)
 
-	local sidebar = new("Frame", { Bg = "Background", Size = Dim2(0, Metrics.SidebarW, 1, 0) }, root)
+	local sidebar = new("Frame", { Size = Dim2(0, Metrics.SidebarW, 1, 0) }, root)
 	win.Sidebar = sidebar
-	makeIcon(sidebar, "logo", 24, "Accent", "Background", { Position = Offset(Metrics.Pad * 2, 18) })
-	label(sidebar, { Text = win.Title, TextSize = 17, Weight = Enum.FontWeight.Bold, X = 57, Y = 15, RowH = 26, W = 112 })
-	label(sidebar, { Text = "CONTROL CENTER", TextSize = 9, Weight = Enum.FontWeight.SemiBold, Fg = "InactiveText", X = 57, Y = 36, RowH = 13, W = 112 })
-	new("Frame", { Bg = "Outline", Position = Offset(Metrics.Pad, 58), Size = Dim2(1, -Metrics.Pad * 2, 0, 1) }, sidebar)
+	makeIcon(sidebar, "logo", 20, "Accent", "Background", { Position = Offset(Metrics.Pad * 2, 15) })
+	label(sidebar, { Text = win.Title, TextSize = 16, Weight = Enum.FontWeight.Bold, X = 51, Y = 11, RowH = 28, W = 85 })
 	win.Indicator = new("Frame", { Bg = "Inline", Size = Offset(Metrics.TabW - 2, Metrics.TabH - 2), Radius = Metrics.PillRadius, Border = "Outline", Visible = false }, sidebar)
 	local searchButton = new("TextButton", {
 		Position = Dim2(0, Metrics.Pad + 1, 1, -(Metrics.Pad + Metrics.SearchH) + 1), Size = Offset(Metrics.TabW - 2, Metrics.SearchH - 2), Radius = Metrics.PillRadius, Border = "Outline", BackgroundTransparency = 0,
@@ -4355,79 +4369,38 @@ function Blossom.new(options)
 		end
 	end))
 
-	local scrollClock = 0
 	local function perFrame(dt)
-		if win.Destroyed then return end
-		local hasThemeWork = next(win.PendingThemeKeys) ~= nil
-		if not win.Visible and not hasThemeWork and not win.OpenDropdown and not win.Search.Dirty and not win.AnimatingColors then return end
-		if hasThemeWork then win:_flushThemeColors(dt) end
+		win:_flushThemeColors(dt)
 		if win.OpenDropdown then win.OpenDropdown.Follow() end
-		-- Scroll edge fades are visual polish, not frame-critical. Sample at 12 Hz.
-		if win.Visible and win.CurrentTab and not win.Moving then
-			scrollClock += dt
-			if scrollClock >= 1 / 12 then
-				scrollClock = 0
-				for _, column in win:Cols() do
-					local y = column.Scroll.CanvasPosition.Y
-					local showTop = y > 1
-					local showBottom = y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1
-					if showTop ~= column.ShowTop then
-						column.ShowTop = showTop
-						animate(column.FadeTop, "BackgroundTransparency", showTop and 0 or 1, "Fast")
-					end
-					if showBottom ~= column.ShowBottom then
-						column.ShowBottom = showBottom
-						animate(column.FadeBottom, "BackgroundTransparency", showBottom and 0 or 1, "Fast")
-					end
+		if win.CurrentTab and win.Visible and not win.Moving then
+			for _, column in win:Cols() do
+				local y = column.Scroll.CanvasPosition.Y
+				local showTop, showBottom = y > 1, y < column.ContentH - column.Scroll.AbsoluteSize.Y - 1
+				if showTop ~= column.ShowTop then
+					column.ShowTop = showTop
+					animate(column.FadeTop, "BackgroundTransparency", showTop and 0 or 1, "Fast")
+				end
+				if showBottom ~= column.ShowBottom then
+					column.ShowBottom = showBottom
+					animate(column.FadeBottom, "BackgroundTransparency", showBottom and 0 or 1, "Fast")
 				end
 			end
-		else
-			scrollClock = 0
 		end
 		if win.Search.Dirty then
 			win.Search.Dirty = false
 			win.Search.Sync()
 		end
-		-- Animated colour controls are the only reason to visit the colour registry per frame.
-		if win.AnimatingColors then
-			local any = false
-			for _, color in win.Colors do
-				if color.Animation ~= "None" then color:Step(dt); any = true end
-			end
-			win.AnimatingColors = any
+		for _, color in win.Colors do
+			if color.Animation ~= "None" then color:Step(dt) end
 		end
 	end
-	-- The main UI update loop exists only while the main window is visible.
-	-- Watermark and keybind systems retain their own original update paths.
-	local uiAccumulator = 0
-	win.SetUIUpdateActive = function(self, active)
-		if active then
-			if self.UIUpdateConnection then return end
-			self.UIUpdateConnection = RunService.Heartbeat:Connect(function(dt)
-				if not self.Visible or self.Destroyed then return end
-				uiAccumulator += dt
-				if uiAccumulator >= 1 / 24 then
-					local elapsed = uiAccumulator
-					uiAccumulator = 0
-					perFrame(elapsed)
-				end
-			end)
-			table.insert(self.Connections, self.UIUpdateConnection)
-		else
-			if self.UIUpdateConnection then
-				self.UIUpdateConnection:Disconnect()
-				self.UIUpdateConnection = nil
-			end
-			uiAccumulator = 0
-		end
-	end
+	Jobs[perFrame] = true
 
 	holder.Visible, win.Visible = false, false
 	win.Watermark.Visible, win.Hotkeys.Visible = false, false
 	task.defer(function()
 		if win.Screen.Parent == nil then return end
 		win:SetVisible(true)
-		win:SetUIUpdateActive(true)
 		win.OverlayReady = true
 		for _, frame in { win.Watermark, win.Hotkeys } do win:_fadeOverlay(frame, win.OverlayWanted[frame] ~= false) end
 	end)
