@@ -19,6 +19,11 @@ local HTTP = game:GetService("HttpService")
 local Vec2, Dim2, Off, RGB = Vector2.new, UDim2.new, UDim2.fromOffset, Color3.fromRGB
 local floor, round, abs, clamp = math.floor, math.round, math.abs, math.clamp
 local FONT = "rbxassetid://12187365364"
+local Fonts = {
+	Inter = FONT, ["Builder Sans"] = "rbxasset://fonts/families/BuilderSans.json", Roboto = "rbxasset://fonts/families/Roboto.json",
+	Montserrat = "rbxasset://fonts/families/Montserrat.json", ["Source Sans Pro"] = "rbxasset://fonts/families/SourceSansPro.json",
+	Ubuntu = "rbxasset://fonts/families/Ubuntu.json", Nunito = "rbxasset://fonts/families/Nunito.json", Arimo = "rbxasset://fonts/families/Arimo.json",
+}
 local FULL = 99
 local M = { Pad = 10, Gap = 6, Row = 16, Radius = 3, Card = 4, Pill = 5, Float = 6, SidebarW = 141, TabW = 121, TabH = 28, SliderH = 33, DropdownH = 47, InputH = 26, ButtonH = 28, ListRowH = 24 }
 
@@ -1280,7 +1285,7 @@ function Window:Notify(o)
 	if type(o) == "string" then o = { Text = o } end
 	local text = o.Text or o.Description or o.Title or ""
 	local f = mk("Frame", { Bg = "Background", Size = Off(0, 28), AutomaticSize = Enum.AutomaticSize.X, Radius = M.Float, Border = "Outline", BackgroundTransparency = 1 }, self.Notifications)
-	f.LayoutOrder = -os.clock() * 1000
+	f.LayoutOrder = -floor(os.clock() * 1000)
 	local pad = Instance.new("UIPadding"); pad.PaddingLeft = UDim.new(0, 28); pad.PaddingRight = UDim.new(0, 10); pad.Parent = f
 	icon(f, o.Icon or "check", 14, function() return RGB(112, 205, 132) end, { Position = Off(-20, 7) })
 	local t = mk("TextLabel", { Fg = "Text", Text = text, TextSize = 12, Size = Off(0, 28), AutomaticSize = Enum.AutomaticSize.X, TextYAlignment = Enum.TextYAlignment.Center }, f)
@@ -1677,7 +1682,7 @@ end
 -------------------------------------------------------------------------------
 -- Blossom.new
 -------------------------------------------------------------------------------
-local Blossom = { Themes = Themes, ThemeOrder = ThemeOrder, Metrics = M, GetThemeColor = function(k) return Current[k] end }
+local Blossom = { Themes = Themes, ThemeOrder = ThemeOrder, Metrics = M, Fonts = Fonts, GetThemeColor = function(k) return Current[k] end }
 local LastWindow
 
 local function guiParent(screen)
@@ -1693,7 +1698,7 @@ function Blossom.new(o)
 	local prev = LastWindow or (genv and genv.__BlossomWindow)
 	if prev then pcall(prev.Destroy, prev) end
 	if o.Theme and Themes[o.Theme] then for k, v in Themes[o.Theme] do Current[k] = v end end
-	if o.Font then FONT = o.Font end
+	if o.Font then FONT = Fonts[o.Font] or (tostring(o.Font):find("rbx", 1, true) and o.Font) or FONT end
 	if o.IconBase then IconBase = type(o.IconBase) == "table" and o.IconBase or { o.IconBase } end
 	local minS = o.MinSize or Vec2(520, 380)
 	local size = o.Size or Vec2(586, 466)
@@ -1752,7 +1757,7 @@ function Blossom.new(o)
 	if o.Resizable ~= false then
 		local gh = false
 		icon(grip, "blossom-resize", 12, function() return gh and Current.InactiveText or Current.Outline end, { Position = Off(2, 2) })
-		hover(grip, function() gh = true; for _, p in grip.Icon.Parts or {} do end end, function() gh = false end)
+		
 		grip.MouseButton1Down:Connect(function()
 			win:CloseFloating()
 			local start, sw, sh = mousePos(), win.Width, win.Height
